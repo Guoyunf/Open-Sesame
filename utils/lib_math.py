@@ -3,6 +3,15 @@ import transforms3d as tfs
 import cv2
 
 
+def euler_to_quaternion_zyx(roll, pitch, yaw):
+    """将欧拉角 (roll, pitch, yaw) 转换为四元数。
+
+    使用 ``zyx`` 内旋顺序，返回格式为 ``[x, y, z, w]``。
+    """
+    q_wxyz = tfs.euler.euler2quat(roll, pitch, yaw, axes="szyx")
+    return np.array([q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]])
+
+
 def EulerAngle_to_R(rpy, rad=False):
     rpy = np.array(rpy)
     r, p, y = rpy

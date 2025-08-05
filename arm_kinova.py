@@ -26,7 +26,6 @@ import numpy as np
 
 import rospy
 import actionlib
-from scipy.spatial.transform import Rotation
 from geometry_msgs.msg import (
     Point,
     Quaternion,
@@ -34,6 +33,7 @@ from geometry_msgs.msg import (
 )  # 导入 PoseStamped 消息类型
 from std_msgs.msg import Header
 import kinova_msgs.msg as km
+from utils.lib_math import EulerAngle_to_R, H_to_xyzrpy, euler_to_quaternion_zyx
 
 # 尝试从 tf.transformations 导入，这是 ROS1 的标准方式
 try:
@@ -44,31 +44,6 @@ except ImportError:
 
     quaternion_from_euler = tfs.quaternion_from_euler
     euler_from_quaternion = tfs.euler_from_quaternion
-
-
-def euler_to_quaternion_zyx(roll, pitch, yaw):
-    """
-    一个标准的转换函数：将欧拉角(Roll, Pitch, Yaw)通过'zyx'内旋顺序转换为四元数。
-
-    这个函数不包含任何针对特定机器人数据的重排逻辑，使其通用且可复用。
-
-    Args:
-        roll (float): 绕X轴的旋转角度（弧度）。
-        pitch (float): 绕Y轴的旋转角度（弧度）。
-        yaw (float): 绕Z轴的旋转角度（弧度）。
-
-    Returns:
-        numpy.ndarray: [x, y, z, w] 格式的四元数。
-    """
-    # 使用'zyx'旋转序列进行对象创建。
-    # scikit-learn的 `from_euler` 期望的顺序就是 [roll, pitch, yaw]
-    rotation_obj = Rotation.from_euler("zyx", [roll, pitch, yaw], degrees=False)
-
-    # .as_quat() 返回 [x, y, z, w] 格式的四元数
-    calculated_quaternion = rotation_obj.as_quat()
-
-    return calculated_quaternion
-
 
 # -------------------- ROS-层封装 -------------------- #
 
@@ -284,12 +259,12 @@ class Arm:
         将 [x,y,z,rx,ry,rz] (弧度) 从相机坐标系变换到基坐标系。
         """
         cam2base = self.cam2base_H
-        t2c_R = _eul2R(xyzrpy_cam[3:])
+        t2c_R = EulerAngle_to_R(xyzrpy_cam[3:], rad=True)
         t2c_t = np.array(xyzrpy_cam[:3]).reshape(3, 1)
         t2c_H = np.block([[t2c_R, t2c_t], [np.zeros((1, 3)), 1]])
         t2b_H = cam2base @ t2c_H
-        xyz, rpy = _H_to_xyzrpy(t2b_H)
-        return xyz + rpy
+        xyzrpy = H_to_xyzrpy(t2b_H, rad=True)
+        return xyzrpy.tolist()
 
     def move_p(self, pos_rpy, block=True):
         """
@@ -324,41 +299,6 @@ class Arm:
                 f"[Arm INFO] 当前手指角度: {np.round(finger_pose, 2).tolist()}"
             )
         return finger_pose
-
-
-# -------------------- 辅助数学函数 -------------------- #
-
-
-def _eul2R(rpy):
-    """欧拉角到旋转矩阵的转换"""
-    r, p, y = rpy
-    Rx = np.array(
-        [[1, 0, 0], [0, math.cos(r), -math.sin(r)], [0, math.sin(r), math.cos(r)]]
-    )
-    Ry = np.array(
-        [[math.cos(p), 0, math.sin(p)], [0, 1, 0], [-math.sin(p), 0, math.cos(p)]]
-    )
-    Rz = np.array(
-        [[math.cos(y), -math.sin(y), 0], [math.sin(y), math.cos(y), 0], [0, 0, 1]]
-    )
-    return Rz @ Ry @ Rx
-
-
-def _H_to_xyzrpy(H):
-    """齐次变换矩阵到 [xyz, rpy] 的转换"""
-    xyz = H[:3, 3].flatten().tolist()
-    R = H[:3, :3]
-    sy = math.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
-    singular = sy < 1e-6
-    if not singular:
-        rx = math.atan2(R[2, 1], R[2, 2])
-        ry = math.atan2(-R[2, 0], sy)
-        rz = math.atan2(R[1, 0], R[0, 0])
-    else:
-        rx = math.atan2(-R[1, 2], R[1, 1])
-        ry = math.atan2(-R[2, 0], sy)
-        rz = 0
-    return xyz, [rx, ry, rz]
 
 
 # -------------------- 主程序入口：用于直接运行和测试 -------------------- #
