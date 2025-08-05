@@ -35,7 +35,9 @@ sys.path.append(root_dir)
 from camera import Camera
 from arm_kinova import Arm
 from dog_gs import RosBase
+
 # from dtsam import DeticSAM # Uncomment when using model-based detection
+
 
 # =============================================================================
 # --- Option 1: Manual Handle Detection via Mouse Click ---
@@ -73,18 +75,26 @@ def get_handle_coords_manual(cam: Camera):
             # 2) If direct depth is invalid, try averaging a small region (ROI)
             if d_raw == 0 or d_raw is None:
                 print("Direct depth is zero, trying ROI average...")
-                d_raw = cam.get_depth_roi(x, y, depth_img,
-                                          radius=15,
-                                          depth_threshold=0.05,
-                                          valid_ratio_threshold=0.5)
+                d_raw = cam.get_depth_roi(
+                    x,
+                    y,
+                    depth_img,
+                    radius=15,
+                    depth_threshold=0.05,
+                    valid_ratio_threshold=0.5,
+                )
 
             if d_raw is None:
-                print(f"[WARNING] Could not determine a valid depth for pixel ({x},{y}). Please try again.")
+                print(
+                    f"[WARNING] Could not determine a valid depth for pixel ({x},{y}). Please try again."
+                )
                 return
 
             # 3) Convert 2D pixel + depth to 3D coordinates
             X, Y, Z = cam.xy_depth_2_xyz(x, y, d_raw)
-            print(f"-> Pixel ({x},{y}) | Depth: {d_raw:.0f}mm | 3D Coords (X,Y,Z): ({X:.4f}, {Y:.4f}, {Z:.4f}) m")
+            print(
+                f"-> Pixel ({x},{y}) | Depth: {d_raw:.0f}mm | 3D Coords (X,Y,Z): ({X:.4f}, {Y:.4f}, {Z:.4f}) m"
+            )
 
             coords.update({"x": x, "y": y, "X": X, "Y": Y, "Z": Z, "done": True})
 
@@ -148,7 +158,9 @@ def get_handle_coords_model(model: str, cam: Camera):
         return None, None, None
 
     X, Y, Z = cam.xy_depth_2_xyz(x, y, d_raw)
-    print(f"Model detected handle at pixel ({x},{y}) -> 3D Coords (X,Y,Z): ({X:.4f}, {Y:.4f}, {Z:.4f}) m")
+    print(
+        f"Model detected handle at pixel ({x},{y}) -> 3D Coords (X,Y,Z): ({X:.4f}, {Y:.4f}, {Z:.4f}) m"
+    )
     return X, Y, Z
 
 
@@ -162,8 +174,8 @@ def main():
     # --- 1. Initialization ---
     print("Initializing robot components...")
     try:
-        cam = Camera.init_from_yaml(cfg_path=f'{root_dir}/cfg/cfg_cam.yaml')
-        arm = Arm.init_from_yaml(cfg_path=f'{root_dir}/cfg/cfg_arm_left.yaml')
+        cam = Camera.init_from_yaml(cfg_path=f"{root_dir}/cfg/cfg_cam.yaml")
+        arm = Arm.init_from_yaml(cfg_path=f"{root_dir}/cfg/cfg_arm_left.yaml")
         base = RosBase(linear_velocity=0.3, angular_velocity=0.5)
         # dtsam_model = DeticSAM(...) # Uncomment and initialize your model here for Option 2
     except Exception as e:
@@ -194,13 +206,27 @@ def main():
     # Define the "pull down" position. We keep X/Y the same but move Z down.
     # The pull-down distance (e.g., 8 cm) may need adjustment.
     PULL_DOWN_DISTANCE = 0.08  # meters
-    HOME_POSITION = [0.21248655021190643, -0.2564840614795685, 0.5075023174285889, 1.6500247716903687, 1.11430025100708, 0.12375058978796005]
+    HOME_POSITION = [
+        0.21248655021190643,
+        -0.2564840614795685,
+        0.5075023174285889,
+        1.6500247716903687,
+        1.11430025100708,
+        0.12375058978796005,
+    ]
 
     # The handle position becomes our "approach" and "grasp" target.
     xyzrpy_grasp_cam = [x_cam, y_cam, z_cam, rx_grasp, ry_grasp, rz_grasp]
 
     # The pull-down pose has a lower Z value in the camera frame.
-    xyzrpy_pull_cam = [x_cam, y_cam, z_cam - PULL_DOWN_DISTANCE, rx_grasp, ry_grasp, rz_grasp]
+    xyzrpy_pull_cam = [
+        x_cam,
+        y_cam,
+        z_cam - PULL_DOWN_DISTANCE,
+        rx_grasp,
+        ry_grasp,
+        rz_grasp,
+    ]
 
     # --- 4. Coordinate Transformation & Pose Definition ---
     # Define the grasp pose in the camera frame first.
@@ -208,7 +234,9 @@ def main():
 
     # a. Transform the grasp pose from the camera frame to the robot's base frame.
     print("Transforming grasp pose to base frame...")
-    pos_grasp_base = arm.target2cam_xyzrpy_to_target2base_xyzrpy(xyzrpy_cam=xyzrpy_grasp_cam)
+    pos_grasp_base = arm.target2cam_xyzrpy_to_target2base_xyzrpy(
+        xyzrpy_cam=xyzrpy_grasp_cam
+    )
 
     # Ensure the desired gripper orientation is set correctly after transformation.
     pos_grasp_base[3:6] = rx_grasp, ry_grasp, rz_grasp
@@ -216,10 +244,12 @@ def main():
 
     # b. Define the pull-down pose directly in the base frame.
     # This is done by subtracting from the Z-coordinate of the grasp pose.
-    print(f"Calculating pull-down pose by moving {PULL_DOWN_DISTANCE}m down in the base frame...")
+    print(
+        f"Calculating pull-down pose by moving {PULL_DOWN_DISTANCE}m down in the base frame..."
+    )
     pos_pull_base = list(pos_grasp_base)  # Create a copy
-    pos_pull_base[2] -= PULL_DOWN_DISTANCE # Subtract from the Z-axis (index 2)
-    
+    pos_pull_base[2] -= PULL_DOWN_DISTANCE  # Subtract from the Z-axis (index 2)
+
     print(f"Target Pull Pose (Base Frame):  {np.round(pos_pull_base, 4)}")
     time.sleep(1)
 
@@ -229,7 +259,7 @@ def main():
 
         # a. Open gripper and move to grasp position
         print("Step 1: Opening gripper...")
-        arm.control_gripper(open_value=0) # Open wide
+        arm.control_gripper(open_value=0)  # Open wide
         time.sleep(1)
 
         print(f"Step 2: Moving to handle at {np.round(pos_grasp_base[:3], 4)}...")
@@ -238,8 +268,8 @@ def main():
 
         # b. Close gripper to grasp handle
         print("Step 3: Grasping handle...")
-        arm.control_gripper(open_value=6000) # Close to grasp
-        time.sleep(1.5) # Wait for grasp to be firm
+        arm.control_gripper(open_value=6000)  # Close to grasp
+        time.sleep(1.5)  # Wait for grasp to be firm
 
         # Optional: Check if grasp was successful
         # if arm.get_gripper_grasp_return() != 2:
@@ -273,5 +303,5 @@ def main():
         print("System shutdown.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
