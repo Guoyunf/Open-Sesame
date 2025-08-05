@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 
 """
-Author: TX-Leo
-Mail: tx.leo.wz@gmail.com
-Date: 2024-04-30 16:43:14
 Version: v1
 Brief: 使用 Realsense 相机采集图像，同时通过 ROS 获取 Kinova 机械臂姿态并保存。
 """
