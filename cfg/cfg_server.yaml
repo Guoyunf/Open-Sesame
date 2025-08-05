@@ -1,5 +1,5 @@
 hostname: '111.2.199.31'
-port: '7020'
+port: 7020
 username: 'yunfei'
-password: 'Gyf99/01/08'
-if_stfp: True
+password: 'CHANGE_ME'
+use_sftp: true
