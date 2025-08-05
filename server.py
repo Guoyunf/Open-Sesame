@@ -86,7 +86,10 @@ class Server:
         except paramiko.AuthenticationException:
             print("Authentication failed. Please check your credentials.")
         except paramiko.SSHException as ssh_ex:
-            print("Error occurred while connecting or establishing an SSH session:", ssh_ex)
+            print(
+                "Error occurred while connecting or establishing an SSH session:",
+                ssh_ex,
+            )
         except paramiko.ssh_exception.NoValidConnectionsError as conn_ex:
             print("Unable to connect to the server:", conn_ex)
         except Exception as ex:  # pragma: no cover - defensive
@@ -145,7 +148,9 @@ class Server:
         if verbose:
             print(f"{local_path} has been transferred to {remote_path}")
 
-    def download_file(self, remote_path: str, local_path: str, *, verbose: bool = False) -> None:
+    def download_file(
+        self, remote_path: str, local_path: str, *, verbose: bool = False
+    ) -> None:
         """Download a file from the remote server."""
         if self.sftp is None:
             raise RuntimeError("SFTP client not initialised.")
@@ -153,7 +158,9 @@ class Server:
         if verbose:
             print(f"{remote_path} has been transferred to {local_path}")
 
-    def download_directory(self, remote_dir: str, local_dir: str, *, verbose: bool = False) -> None:
+    def download_directory(
+        self, remote_dir: str, local_dir: str, *, verbose: bool = False
+    ) -> None:
         """Recursively download a directory from the remote server."""
         if self.sftp is None:
             raise RuntimeError("SFTP client not initialised.")
@@ -172,7 +179,9 @@ class Server:
         if verbose:
             print(f"{remote_dir} has been transferred to {local_dir}")
 
-    def create_remote_file(self, content: str, remote_path: str, *, verbose: bool = False) -> None:
+    def create_remote_file(
+        self, content: str, remote_path: str, *, verbose: bool = False
+    ) -> None:
         """Create a file on the remote server with the given content."""
         if self.sftp is None:
             raise RuntimeError("SFTP client not initialised.")
@@ -209,4 +218,3 @@ def main() -> None:  # pragma: no cover - example usage
 
 if __name__ == "__main__":
     main()
-

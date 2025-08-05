@@ -27,7 +27,11 @@ import numpy as np
 import rospy
 import actionlib
 from scipy.spatial.transform import Rotation
-from geometry_msgs.msg import Point, Quaternion, PoseStamped  # 导入 PoseStamped 消息类型
+from geometry_msgs.msg import (
+    Point,
+    Quaternion,
+    PoseStamped,
+)  # 导入 PoseStamped 消息类型
 from std_msgs.msg import Header
 import kinova_msgs.msg as km
 
@@ -37,34 +41,37 @@ try:
 # 如果失败，则尝试从 tf_conversions 导入，这在某些环境下需要
 except ImportError:
     from tf_conversions import transformations as tfs
+
     quaternion_from_euler = tfs.quaternion_from_euler
     euler_from_quaternion = tfs.euler_from_quaternion
+
 
 def euler_to_quaternion_zyx(roll, pitch, yaw):
     """
     一个标准的转换函数：将欧拉角(Roll, Pitch, Yaw)通过'zyx'内旋顺序转换为四元数。
-    
+
     这个函数不包含任何针对特定机器人数据的重排逻辑，使其通用且可复用。
-    
+
     Args:
         roll (float): 绕X轴的旋转角度（弧度）。
         pitch (float): 绕Y轴的旋转角度（弧度）。
         yaw (float): 绕Z轴的旋转角度（弧度）。
-        
+
     Returns:
         numpy.ndarray: [x, y, z, w] 格式的四元数。
     """
     # 使用'zyx'旋转序列进行对象创建。
     # scikit-learn的 `from_euler` 期望的顺序就是 [roll, pitch, yaw]
-    rotation_obj = Rotation.from_euler('zyx', [roll, pitch, yaw], degrees=False)
-    
+    rotation_obj = Rotation.from_euler("zyx", [roll, pitch, yaw], degrees=False)
+
     # .as_quat() 返回 [x, y, z, w] 格式的四元数
     calculated_quaternion = rotation_obj.as_quat()
-    
+
     return calculated_quaternion
 
 
 # -------------------- ROS-层封装 -------------------- #
+
 
 def _pose_action_address(prefix: str):
     """获取位姿控制 Action Server 的地址"""
@@ -80,32 +87,36 @@ def _cartesian_euler_feedback_topic(prefix: str):
     """获取发布欧拉角位姿反馈的主题地址"""
     return f"/{prefix}driver/out/cartesian_command"
 
-def _finger_position(prefix : str):
+
+def _finger_position(prefix: str):
     """获取夹爪角度"""
     return f"/{prefix}driver/out/finger_position"
+
 
 def _tool_pose_quaternion_feedback_topic(prefix: str):
     """获取发布四元数位姿反馈的主题地址"""
     return f"/{prefix}driver/out/tool_pose"
 
 
-def _call_pose_action(prefix: str,
-                      position_xyz,
-                      quat_xyzw,
-                      timeout: float = 30.0):
+def _call_pose_action(prefix: str, position_xyz, quat_xyzw, timeout: float = 30.0):
     """
     阻塞式发送笛卡尔位姿 action goal。
     """
     client = actionlib.SimpleActionClient(
-        _pose_action_address(prefix), km.ArmPoseAction)
+        _pose_action_address(prefix), km.ArmPoseAction
+    )
     if not client.wait_for_server(rospy.Duration(5.0)):
-        raise RuntimeError("连接手臂 Action Server 失败，请检查 robot_prefix 是否正确、驱动是否已启动")
+        raise RuntimeError(
+            "连接手臂 Action Server 失败，请检查 robot_prefix 是否正确、驱动是否已启动"
+        )
     goal = km.ArmPoseGoal()
     goal.pose.header = Header(frame_id=f"{prefix}link_base")
     goal.pose.pose.position = Point(*position_xyz)
     # 注意：ROS的Quaternion顺序是 (x,y,z,w)，但quaternion_from_euler返回的是(w,x,y,z)
     # 所以需要确认这里的输入顺序。kinova_msgs/ArmPose需要(x,y,z,w)
-    goal.pose.pose.orientation = Quaternion(quat_xyzw[0], quat_xyzw[1], quat_xyzw[2], quat_xyzw[3])
+    goal.pose.pose.orientation = Quaternion(
+        quat_xyzw[0], quat_xyzw[1], quat_xyzw[2], quat_xyzw[3]
+    )
     client.send_goal(goal)
     ok = client.wait_for_result(rospy.Duration(timeout))
     if not ok:
@@ -114,14 +125,13 @@ def _call_pose_action(prefix: str,
     return client.get_result()
 
 
-def _call_finger_action(prefix: str,
-                        turn_value: float,
-                        timeout: float = 10.0):
+def _call_finger_action(prefix: str, turn_value: float, timeout: float = 10.0):
     """
     阻塞式发送夹爪 action goal。双指爪 finger1/2 取相同值。
     """
     client = actionlib.SimpleActionClient(
-        _finger_action_address(prefix), km.SetFingersPositionAction)
+        _finger_action_address(prefix), km.SetFingersPositionAction
+    )
     if not client.wait_for_server(rospy.Duration(5.0)):
         raise RuntimeError("连接夹爪 Action Server 失败")
     goal = km.SetFingersPositionGoal()
@@ -138,6 +148,7 @@ def _call_finger_action(prefix: str,
 
 # -------------------- 与旧接口兼容的 Arm 类 -------------------- #
 
+
 class Arm:
     """
     Kinova 机械臂的高级封装，使其看起来像你原来的 Arm 类。
@@ -151,18 +162,22 @@ class Arm:
         print(f"从 {full_cfg_path} 加载配置...")
         with open(full_cfg_path, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
-        return cls(root_dir=root_dir,
-                   robot_prefix=cfg.get("robot_prefix", "j2n6s200_"),
-                   cam2base_H_path=cfg.get("cam2base_H_path", "cfg/cam2base_H_left.csv"),
-                   gripper_open=cfg.get("gripper_open", 0),
-                   gripper_close=cfg.get("gripper_close", 6000))
+        return cls(
+            root_dir=root_dir,
+            robot_prefix=cfg.get("robot_prefix", "j2n6s200_"),
+            cam2base_H_path=cfg.get("cam2base_H_path", "cfg/cam2base_H_left.csv"),
+            gripper_open=cfg.get("gripper_open", 0),
+            gripper_close=cfg.get("gripper_close", 6000),
+        )
 
-    def __init__(self,
-                 root_dir: str,
-                 robot_prefix: str,
-                 cam2base_H_path: str,
-                 gripper_open: int,
-                 gripper_close: int):
+    def __init__(
+        self,
+        root_dir: str,
+        robot_prefix: str,
+        cam2base_H_path: str,
+        gripper_open: int,
+        gripper_close: int,
+    ):
         """
         核心初始化方法。
         :param robot_prefix: ROS主题名字前缀, 如 'j2n6s200_'
@@ -178,28 +193,38 @@ class Arm:
         self.cam2base_H = self._load_csv_matrix(os.path.join(root_dir, cam2base_H_path))
         self.gripper_open_val = gripper_open
         self.gripper_close_val = gripper_close
-        
+
         # 创建一个线程锁来保护共享的姿态数据
         self._pose_lock = threading.Lock()
 
         # --- 订阅欧拉角姿态 ---
         self._current_pose_euler = [0.0] * 6  # [x, y, z, rx, ry, rz]
-        rospy.Subscriber(_cartesian_euler_feedback_topic(self.prefix),
-                         km.KinovaPose, self._feedback_euler_cb)
+        rospy.Subscriber(
+            _cartesian_euler_feedback_topic(self.prefix),
+            km.KinovaPose,
+            self._feedback_euler_cb,
+        )
         print(f"已订阅欧拉角姿态主题: {_cartesian_euler_feedback_topic(self.prefix)}")
 
         # --- 新增：订阅四元数姿态 ---
         self._current_pose_quat = [0.0] * 7  # [x, y, z, qx, qy, qz, qw]
-        rospy.Subscriber(_tool_pose_quaternion_feedback_topic(self.prefix),
-                         PoseStamped, self._feedback_quat_cb)
-        print(f"已订阅四元数姿态主题: {_tool_pose_quaternion_feedback_topic(self.prefix)}")
+        rospy.Subscriber(
+            _tool_pose_quaternion_feedback_topic(self.prefix),
+            PoseStamped,
+            self._feedback_quat_cb,
+        )
+        print(
+            f"已订阅四元数姿态主题: {_tool_pose_quaternion_feedback_topic(self.prefix)}"
+        )
 
         # # --- new add  : finger action ---
         self._current_finger_action = [0.0] * 3
-        rospy.Subscriber(_finger_position(self.prefix),
-                         km.FingerPosition, self._feedback_finger_action)
+        rospy.Subscriber(
+            _finger_position(self.prefix),
+            km.FingerPosition,
+            self._feedback_finger_action,
+        )
         print(f"已订阅手指主题: {_finger_position(self.prefix)}")
-
 
     @staticmethod
     def _load_csv_matrix(path):
@@ -210,8 +235,14 @@ class Arm:
     def _feedback_euler_cb(self, msg: km.KinovaPose):
         """处理欧拉角姿态消息的回调函数"""
         with self._pose_lock:
-            self._current_pose_euler = [msg.X, msg.Y, msg.Z,
-                                        msg.ThetaX, msg.ThetaY, msg.ThetaZ]
+            self._current_pose_euler = [
+                msg.X,
+                msg.Y,
+                msg.Z,
+                msg.ThetaX,
+                msg.ThetaY,
+                msg.ThetaZ,
+            ]
 
     def _feedback_quat_cb(self, msg: PoseStamped):
         """处理四元数姿态消息的回调函数"""
@@ -220,11 +251,11 @@ class Arm:
             o = msg.pose.orientation
             self._current_pose_quat = [p.x, p.y, p.z, o.x, o.y, o.z, o.w]
 
-    def _feedback_finger_action(self, msg : km.FingerPosition):
+    def _feedback_finger_action(self, msg: km.FingerPosition):
         """读取finger值"""
         with self._pose_lock:
             self._current_finger_action = [msg.finger1, msg.finger2, msg.finger3]
-        
+
     def get_p(self, if_p=False):
         """
         获取机械臂末端的笛卡尔坐标 (使用欧拉角)。
@@ -283,24 +314,35 @@ class Arm:
         """
         _call_finger_action(self.prefix, open_value)
         return 0
-    
-    def gripper_value(self,if_p = False):
+
+    def gripper_value(self, if_p=False):
         with self._pose_lock:
             finger_pose = self._current_finger_action.copy()
         if if_p:
             # 使用 rospy.loginfo 来打印，这是ROS推荐的做法
-            rospy.loginfo(f"[Arm INFO] 当前手指角度: {np.round(finger_pose, 2).tolist()}")
+            rospy.loginfo(
+                f"[Arm INFO] 当前手指角度: {np.round(finger_pose, 2).tolist()}"
+            )
         return finger_pose
 
+
 # -------------------- 辅助数学函数 -------------------- #
+
 
 def _eul2R(rpy):
     """欧拉角到旋转矩阵的转换"""
     r, p, y = rpy
-    Rx = np.array([[1, 0, 0], [0, math.cos(r), -math.sin(r)], [0, math.sin(r), math.cos(r)]])
-    Ry = np.array([[math.cos(p), 0, math.sin(p)], [0, 1, 0], [-math.sin(p), 0, math.cos(p)]])
-    Rz = np.array([[math.cos(y), -math.sin(y), 0], [math.sin(y), math.cos(y), 0], [0, 0, 1]])
+    Rx = np.array(
+        [[1, 0, 0], [0, math.cos(r), -math.sin(r)], [0, math.sin(r), math.cos(r)]]
+    )
+    Ry = np.array(
+        [[math.cos(p), 0, math.sin(p)], [0, 1, 0], [-math.sin(p), 0, math.cos(p)]]
+    )
+    Rz = np.array(
+        [[math.cos(y), -math.sin(y), 0], [math.sin(y), math.cos(y), 0], [0, 0, 1]]
+    )
     return Rz @ Ry @ Rx
+
 
 def _H_to_xyzrpy(H):
     """齐次变换矩阵到 [xyz, rpy] 的转换"""
@@ -332,7 +374,7 @@ if __name__ == "__main__":
         # 关键步骤：给予 ROS 订阅者一点时间来接收第一次消息
         # 从而避免 get_p() 返回初始化的 [0,0,0,0,0,0]
         print("\n正在等待从机械臂接收到初始状态...")
-        time.sleep(1.0) # 等待1秒，通常足够了
+        time.sleep(1.0)  # 等待1秒，通常足够了
 
         # --- 3. 读取并打印当前位姿 ---
         print("\n--- 读取当前位姿 ---")
@@ -349,15 +391,15 @@ if __name__ == "__main__":
         # --- 4. 执行一个简单的动作 ---
         print("\n--- 执行一个简单的动作 ---")
         print("准备让机械臂在 Z 轴上移动 +3cm...")
-        target_pose = arm.get_p() # 获取当前位姿作为基础
-        if target_pose[2] < 0.01: # 简单的安全检查，防止姿态未正确获取
+        target_pose = arm.get_p()  # 获取当前位姿作为基础
+        if target_pose[2] < 0.01:  # 简单的安全检查，防止姿态未正确获取
             print("错误：无法获取有效的当前位姿，取消移动。")
         else:
-            target_pose[2] -= 0.0 # Z轴坐标增加3cm
+            target_pose[2] -= 0.0  # Z轴坐标增加3cm
             rospy.loginfo(f"目标位姿: {np.round(target_pose, 4).tolist()}")
             arm.move_p(target_pose)
             print("移动指令已发送。")
-            
+
             # --- 5. 控制夹爪 ---
             print("\n--- 控制夹爪 ---")
             print("闭合夹爪...")
@@ -373,7 +415,9 @@ if __name__ == "__main__":
         print(f"\n运行时错误: {e}")
         print("请确保:")
         print("1. ROS master (roscore) 正在运行。")
-        print("2. Kinova 驱动节点正在运行 (例如: roslaunch kinova_bringup kinova_robot.launch)。")
+        print(
+            "2. Kinova 驱动节点正在运行 (例如: roslaunch kinova_bringup kinova_robot.launch)。"
+        )
         print("3. 'robot_prefix' 与您启动的驱动匹配。")
     except Exception as e:
         print(f"\n发生未知错误: {e}")
