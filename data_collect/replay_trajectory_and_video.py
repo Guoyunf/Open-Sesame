@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation as R         # ⇐ 需要 scipy
 
 DATA_DIR    = 'data_record'
 SHOW_DEPTH  = True
-SHOW_VIEW2  = False     # 同时显示第二视角
+SHOW_VIEW2  = True     # 同时显示第二视角
 CMAP        = cv2.COLORMAP_JET
 AXIS_LEN    = 0.03      # 三轴箭头长度 (m)
 
