@@ -19,3 +19,4 @@ source /opt/ros/galactic/setup.bash
 ros2 run ros1_bridge dynamic_bridge --bridge-all-topics
 ```
 
+ros2 launch saturn_controller saturn_ros2.launch.py

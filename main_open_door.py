@@ -205,14 +205,23 @@ def main():
 
     # Define the "pull down" position. We keep X/Y the same but move Z down.
     # The pull-down distance (e.g., 8 cm) may need adjustment.
-    PULL_DOWN_DISTANCE = 0.08  # meters
+    PULL_DOWN_DISTANCE = 0.12  # meters
+    # HOME_POSITION = [
+    #     0.21248655021190643,
+    #     -0.2564840614795685,
+    #     0.5075023174285889,
+    #     1.6500247716903687,
+    #     1.11430025100708,
+    #     0.12375058978796005,
+    # ]
+
     HOME_POSITION = [
         0.21248655021190643,
         -0.2564840614795685,
         0.5075023174285889,
-        1.6500247716903687,
-        1.11430025100708,
-        0.12375058978796005,
+        1.512,
+        -0.184,
+        -1.422,
     ]
 
     # The handle position becomes our "approach" and "grasp" target.

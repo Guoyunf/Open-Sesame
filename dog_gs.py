@@ -307,7 +307,7 @@ if __name__ == "__main__":
         base.move_T(2, linear_velocity=0.2)
         rospy.sleep(1)  # Pause
         rospy.loginfo("Rotating right for 1.5 seconds...")
-        base.rotate_T(1.5, angular_velocity=0.5)
+        # base.rotate_T(1.5, angular_velocity=0.5)
         rospy.sleep(1)
 
         # # 3. Marker and Navigation example
