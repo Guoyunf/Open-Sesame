@@ -1,391 +1,224 @@
-import hashlib
-import pickle
-import numpy as np
-import os
-import zarr
-import gzip
-import pandas as pd
-from einops import rearrange
-from pathlib import Path
-from PIL import Image
-from copy import deepcopy
-from datetime import datetime, timedelta
-from glob import glob
-from scipy.interpolate import interp1d
-from typing import (
-    List, 
-    Literal, 
-    NewType, 
-    Optional,
-    TypedDict, 
-    Tuple
-)
+"""Utilities for preprocessing raw episode data.
 
-Speed = Tuple[float, float, float, float, float, float]
-Pose = Tuple[float, float, float, float, float, float] # 6
-Joint = Tuple[float, float, float, float, float, float, float] # 7
+This module loads low-dimensional robot state and camera frames from an
+episode directory, aligns them on a uniform time base and writes the result
+into a replay buffer stored as a Zarr dataset. It is a cleaned and
+re-organised version of the original script.
+"""
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import os
+import pickle
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Literal, NewType, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import zarr
+from PIL import Image
+from scipy.interpolate import interp1d
+
+JPGFilePath = NewType("JPGFilePath", str)
+PickleFilePath = NewType("PickleFilePath", str)
+VideoFilePath = NewType("VideoFilePath", str)
+OSPath = NewType("OSPath", str)
+
 XYPose = Tuple[float, float]
 XYSpeed = Tuple[float, float]
 Timestamp = float
-
-class Obs(TypedDict):
-    pose: Tuple[np.ndarray, float]
-    joint: Tuple[np.ndarray, float]
-
-class LowDimData(TypedDict):
-    obs_buffer: List[Obs]
-    command_history: List[Tuple[List[float], float]]
+Pose = Tuple[float, float, float, float, float, float]
 
 
-def md5(input_string: str) -> str:
-    encoded_string = input_string.encode('utf-8')
-    md5_hash = hashlib.md5()
-    md5_hash.update(encoded_string)
-    return md5_hash.hexdigest()
+@dataclass
+class Episode:
+    """Container holding synchronised episode data."""
 
-JPGFilePath = NewType('JPGFilePath', str)
-PickleFilePath = NewType('PickleFilePath', str)
-VideoFilePath = NewType('VideoFilePath', str)
-OSPath = NewType('OSPath', str)
-
-class Episode(TypedDict):
     camera_0_paths: List[JPGFilePath]
     poses: List[XYPose]
     speeds: List[XYSpeed]
-    timestamps: List[float]
-    
-
-def align_and_upsample(
-        target_timestamp: List[float], 
-        val: np.ndarray, 
-        val_t: np.ndarray, 
-        threshold: float, 
-        fill_with: float = 0.0
-    ) -> np.ndarray:
-    result: List[np.ndarray] = []
-    for t in target_timestamp:
-        matching_indices = np.where(np.abs(val_t - t) <= threshold)[0] 
-        
-        if len(matching_indices) > 0:
-            print(abs(val_t[matching_indices] - t))
-            result.append(val[matching_indices[0]])
-        else:
-            print("no avaialble frame for", t)
-            result.append(np.ones_like(val[0]) * fill_with)
-    return np.asarray(result)
+    timestamps: List[Timestamp]
 
 
-def get_folder_timestamp(x: str) -> float:
-    return float(os.path.basename(x).replace('_', '.'))
+def md5(input_string: str) -> str:
+    return hashlib.md5(input_string.encode("utf-8")).hexdigest()
 
 
-def get_frame_timestamp(x: str) -> float:
-    return float(os.path.basename(x).replace('.jpg', '').split('_')[-1])
+def get_frame_timestamp(path: str) -> float:
+    return float(Path(path).stem.split("_")[-1])
 
 
-def get_episodes_base_folders() -> List[Path]:
-    return list(
-        glob(os.path.join('/mnt/d/jiajingkai/episode', '*'))
-    )
+def get_episode_folders(base_dir: OSPath) -> List[Path]:
+    return sorted(Path(base_dir).glob("*"))
 
 
-def get_sorted_paths(episode_path: OSPath, pattern: str) -> List[str]:
-    return sorted(
-        list(
-            glob(os.path.join(episode_path, pattern))
-        ),
-        key=get_folder_timestamp
-    )
-
-
-def get_camera_frame_paths(episode_path: OSPath, camera_id: Literal[0, 1]) -> List[JPGFilePath]:
-    return sorted(
-        list(
-            glob(os.path.join(episode_path, f'realsense_{camera_id}_*.jpg'))
-        ),
-        key=get_frame_timestamp
-    )
-
-
-def get_gzip_pickle_path(episode_path: OSPath) -> PickleFilePath:
-    pickle_file_paths = list(glob(os.path.join(episode_path, "*.pkl.gz")))
-    assert len(pickle_file_paths) == 1, f"error when load {episode_path}"
-    return pickle_file_paths[0]
-
-def get_pickle_path(episode_path: OSPath) -> PickleFilePath:
-    pickle_file_paths = list(glob(os.path.join(episode_path, "*.pickle")))
-    assert len(pickle_file_paths) == 1, f"error when load {episode_path}"
-    return pickle_file_paths[0]
-
-
-def get_sample(episode_path: OSPath, use_gzip: bool = True) -> LowDimData:
-    if use_gzip is True:
-        return load_gzip_pickle(get_gzip_pickle_path(episode_path))
-    return load_pickle(get_pickle_path(episode_path))
-
-def load_pickle(pickle_path: PickleFilePath) -> LowDimData:
-    with open(pickle_path, 'rb') as f:
+def _load_pickle(path: PickleFilePath) -> dict:
+    with open(path, "rb") as f:
         return pickle.load(f)
 
-def load_gzip_pickle(pickle_path: PickleFilePath) -> LowDimData:
-    with gzip.open(pickle_path, 'rb') as f:
+
+def _load_gzip_pickle(path: PickleFilePath) -> dict:
+    with gzip.open(path, "rb") as f:
         return pickle.load(f)
+
+
+def load_sample(episode_path: OSPath) -> dict:
+    pkl_gz = list(Path(episode_path).glob("*.pkl.gz"))
+    if pkl_gz:
+        return _load_gzip_pickle(PickleFilePath(str(pkl_gz[0])))
+    pkl = list(Path(episode_path).glob("*.pickle"))
+    return _load_pickle(PickleFilePath(str(pkl[0])))
+
 
 def get_poses(episode_path: OSPath) -> Tuple[List[XYPose], List[Timestamp]]:
-    sample = get_sample(episode_path)
-    poses = [
-        sample['obs_buffer'][i]['pose'][0] for i in range(len(sample['obs_buffer']))
-    ]
-    xy_pose =  [
-        (pose[0], pose[1]) for pose in poses
-    ]
-    timestamps = [
-        sample['obs_buffer'][i]['pose'][1] for i in range(len(sample['obs_buffer']))
-    ] 
-    return xy_pose, timestamps
-
-
-def get_joints(episode_path: OSPath) -> List[Joint]:
-    sample = get_sample(episode_path)
-    joints = [
-        sample['obs_buffer'][i]['joint'][0] for i in range(len(sample['obs_buffer']))
-    ]
-    joints = [
-        (joint[0], joint[1], joint[2], joint[3], joint[4], joint[5]) for joint in joints
-    ]
-    timestamps = [
-        sample['obs_buffer'][i]['joint'][1] for i in range(len(sample['obs_buffer']))
-    ] 
-    return joints, timestamps
+    sample = load_sample(episode_path)
+    poses = [obs["pose"][0] for obs in sample["obs_buffer"]]
+    timestamps = [obs["pose"][1] for obs in sample["obs_buffer"]]
+    xy = [(p[0], p[1]) for p in poses]
+    return xy, timestamps
 
 
 def get_speeds(episode_path: OSPath) -> Tuple[List[XYSpeed], List[Timestamp]]:
-    sample = get_sample(episode_path)
-    speeds = [
-        sample['command_history'][i][0] for i in range(len(sample['command_history']))
-    ]
-    timestamps = [
-        sample['command_history'][i][1] for i in range(len(sample['command_history']))
-    ] 
-    xy_speeds = [
-        (speed[0], speed[1]) for speed in speeds
-    ]
-    if len(xy_speeds) == 0:
-        xy_poses, timestamps = get_poses(episode_path)
-        xy_speeds = [
-            ((u - x) / t, (v - y) / t) for (x, y), (u, v), t in zip(xy_poses, xy_poses[1:], timestamps)
-        ]
-        timestamps = timestamps[:-1]
-
-    return xy_speeds, timestamps
+    sample = load_sample(episode_path)
+    speeds = [cmd[0] for cmd in sample["command_history"]]
+    timestamps = [cmd[1] for cmd in sample["command_history"]]
+    xy = [(s[0], s[1]) for s in speeds]
+    if not xy:
+        poses, ts = get_poses(episode_path)
+        xy = [((u - x) / t, (v - y) / t) for (x, y), (u, v), t in zip(poses, poses[1:], ts)]
+        timestamps = ts[:-1]
+    return xy, timestamps
 
 
-def get_cam(episode_path: OSPath, camera_id: Literal[0, 1]) -> Tuple[List[np.ndarray], List[float]]:
-    jpg_paths = get_camera_frame_paths(episode_path, camera_id)
-    imgs = [
-         np.array(Image.open(jpg_path)) for jpg_path in jpg_paths
-    ]
-    timestamps = [
-        get_frame_timestamp(jpg_path) for jpg_path in jpg_paths
-    ]
-    return (imgs, timestamps)
+def get_camera_frame_paths(episode_path: OSPath, camera_id: Literal[0, 1]) -> List[JPGFilePath]:
+    files = sorted(
+        Path(episode_path).glob(f"realsense_{camera_id}_*.jpg"),
+        key=lambda p: get_frame_timestamp(str(p)),
+    )
+    return [JPGFilePath(str(p)) for p in files]
 
 
-def linear_interpolate_resampling(
-        val: List[float], 
-        val_t: List[float], 
-        target_t: List[float]
-    ) -> List[float]:
-        val_t = np.asarray(val_t)
-        val = np.asarray(val)
-        interpolator = interp1d(val_t, val, kind='linear', fill_value='extrapolate')
-        interpolated_values = interpolator(target_t)
-        return list(interpolated_values)
+def linear_interpolate_resampling(val, val_t, target_t):
+    val_t = np.asarray(val_t)
+    val = np.asarray(val)
+    interpolator = interp1d(val_t, val, kind="linear", fill_value="extrapolate")
+    return list(interpolator(target_t))
 
 
-def replace_by_prev_resampling(
-        val: List[float], 
-        val_t: List[float], 
-        target_t: List[float]
-    ) -> List[float]:
-        s = pd.Series(val, index=val_t)
-        t = pd.Index(target_t)
-        s = s.reindex(t, method='ffill')
-        return s.to_list()
+def replace_by_prev_resampling(val, val_t, target_t):
+    s = pd.Series(val, index=val_t)
+    t = pd.Index(target_t)
+    return s.reindex(t, method="ffill").to_list()
 
 
-def resample_2d(
-        vec: List[Tuple[float, float]], 
-        vec_t: List[float], 
-        target_t: List[float], 
-        method=Literal['linear', 'prev']
-    ) -> List[Tuple[float, float]]:
-    assert len(vec[0]) == 2
-    dim_0 = list(map(lambda x: x[0], vec))
-    dim_1 = list(map(lambda x: x[1], vec))
-    if method == 'linear':
+def resample_2d(vec, vec_t, target_t, method: Literal["linear", "prev"] = "linear"):
+    dim0 = [v[0] for v in vec]
+    dim1 = [v[1] for v in vec]
+    if method == "linear":
         return list(
-            (new_0, new_1) for new_0, new_1 in zip(
-                linear_interpolate_resampling(dim_0, vec_t, target_t),
-                linear_interpolate_resampling(dim_1, vec_t, target_t)
+            zip(
+                linear_interpolate_resampling(dim0, vec_t, target_t),
+                linear_interpolate_resampling(dim1, vec_t, target_t),
             )
         )
-    if method == 'prev':
+    if method == "prev":
         return list(
-            (new_0, new_1) for new_0, new_1 in zip(
-                replace_by_prev_resampling(dim_0, vec_t, target_t),
-                replace_by_prev_resampling(dim_1, vec_t, target_t)
+            zip(
+                replace_by_prev_resampling(dim0, vec_t, target_t),
+                replace_by_prev_resampling(dim1, vec_t, target_t),
             )
         )
     raise NotImplementedError
 
-def accelerate_episode(episode: Episode, accelerate_rate: float) -> Episode:
-    start_time = episode['timestamps'][0]
-    accelerated_timestamps = [
-        start_time + (t - start_time) / accelerate_rate for t in episode['timestamps']
-    ]
-    return {
-        "poses": episode["poses"],
-        "speeds": episode["speeds"],
-        "camera_0_paths": episode['camera_0_paths'],
-        "timestamps": accelerated_timestamps
-    }
 
-def resample_episode(episode: Episode, target_freq_hz: float) -> Episode:
-    assert len(episode['camera_0_paths']) == len(episode['poses'])
-    assert len(episode['poses']) == len(episode['speeds']), f"{len(episode['speeds'])} != {len(episode['poses'])}"
-    assert len(episode['speeds']) == len(episode['timestamps']), f"{len(episode['speeds'])} != {len(episode['timestamps'])}"
-    assert 0 < target_freq_hz < 30
-    timestamps = episode['timestamps']
-    start_t = timestamps[0]
-    end_t = timestamps[-1]
-    target_timestamps = generate_sample_timestamps(start_t, end_t, 1.0 / target_freq_hz)
-    return {
-        "poses": resample_2d(episode['poses'], episode['timestamps'], target_timestamps, 'linear'),
-        "speeds": resample_2d(episode['speeds'], episode['timestamps'], target_timestamps, 'prev'),
-        "camera_0_paths": episode['camera_0_paths'],
-        "timestamps": target_timestamps
-    }
-
-
-
-def get_episode(episode_path: OSPath, freq_hz: float = 10, acc_rate: float = 1.0) -> Episode:
-    xy_poses, xy_poses_t = get_poses(episode_path) 
-    xy_speeds, xy_speeds_t = get_speeds(episode_path)
-
-
-    cam_0_paths = get_camera_frame_paths(episode_path, 0)
-    cam0_t = [
-        get_frame_timestamp(jpg_path) for jpg_path in cam_0_paths
-    ]
-    xy_poses = resample_2d(xy_poses, xy_poses_t, cam0_t, 'linear')
-    xy_speeds = resample_2d(xy_speeds, xy_speeds_t, cam0_t, 'prev')
-    episode = {
-        "camera_0_paths": cam_0_paths,
-        "poses": xy_poses,
-        "speeds": xy_speeds,
-        "timestamps": cam0_t,
-    }
-    return accelerate_episode(resample_episode(episode, freq_hz), acc_rate)
-
-
-def generate_sample_timestamps(start_time: float, end_time: float, interval: float) -> list[float]:
+def generate_sample_timestamps(start_time: float, end_time: float, interval: float) -> List[float]:
     samples = [start_time]
-    while True:
-        next_sample = samples[-1] + interval
-        if next_sample > end_time:
-            break
+    while (next_sample := samples[-1] + interval) <= end_time:
         samples.append(next_sample)
     return samples
 
 
+def resample_episode(ep: Episode, target_freq_hz: float, acc_rate: float = 1.0) -> Episode:
+    assert 0 < target_freq_hz < 30
+    start_t, end_t = ep.timestamps[0], ep.timestamps[-1]
+    target_ts = generate_sample_timestamps(start_t, end_t, 1.0 / target_freq_hz)
+    poses = resample_2d(ep.poses, ep.timestamps, target_ts, "linear")
+    speeds = resample_2d(ep.speeds, ep.timestamps, target_ts, "prev")
+    if acc_rate != 1.0:
+        base = target_ts[0]
+        target_ts = [base + (t - base) / acc_rate for t in target_ts]
+    return Episode(ep.camera_0_paths, poses, speeds, target_ts)
 
 
-def create_and_get_video_paths(
-        frame_paths: List[JPGFilePath], 
-        output_dir: OSPath,
-        rename: Optional[str] = None
-    ) -> int:
-    sig = md5(''.join(frame_paths))
-    input_file_path: OSPath = f'{sig}.txt'
+def load_episode(episode_path: OSPath, freq_hz: float = 10.0, acc_rate: float = 1.0) -> Episode:
+    poses, poses_t = get_poses(episode_path)
+    speeds, speeds_t = get_speeds(episode_path)
+    cam_paths = get_camera_frame_paths(episode_path, 0)
+    cam_ts = [get_frame_timestamp(p) for p in cam_paths]
+    poses = resample_2d(poses, poses_t, cam_ts, "linear")
+    speeds = resample_2d(speeds, speeds_t, cam_ts, "prev")
+    return resample_episode(Episode(cam_paths, poses, speeds, cam_ts), freq_hz, acc_rate)
+
+
+def create_video(frame_paths: List[JPGFilePath], output_dir: OSPath, rename: Optional[str] = None) -> int:
+    sig = md5("".join(frame_paths))
     if rename is None:
         rename = sig
-    output_video_path: VideoFilePath = os.path.join(output_dir, f'{rename}.mp4')
-    images_with_timestamps = [
-        (frame_path, int(get_frame_timestamp(frame_path))) for frame_path in frame_paths
-    ]
-    with open(input_file_path, 'w+') as f:
-        for i, (image_path, _) in enumerate(images_with_timestamps):
-            f.write(f"file '{image_path}'\n")
-            #if i < len(durations):
-            #    f.write(f"duration {durations[i]}\n")
-    command = (
-        f'ffmpeg -f concat -safe 0 -i {input_file_path}'
-        f' -vsync vfr -pix_fmt yuv420p -y {output_video_path}'
+    input_list = Path(f"{sig}.txt")
+    output_path = Path(output_dir) / f"{rename}.mp4"
+    with input_list.open("w") as f:
+        for p in frame_paths:
+            f.write(f"file '{p}'\n")
+    cmd = (
+        f"ffmpeg -f concat -safe 0 -i {input_list} -vsync vfr -pix_fmt yuv420p -y {output_path}"
     )
-    error_code = os.system(command)
-    os.remove(os.path.join(f'{sig}.txt'))
-    return error_code
+    error = os.system(cmd)
+    input_list.unlink(missing_ok=True)
+    return error
 
 
-def start(output_dir: OSPath):
-    store = zarr.DirectoryStore(os.path.join(output_dir, 'replay_buffer.zarr'))
-    root = zarr.open(store, mode='w')
+def process_dataset(input_dir: OSPath, output_dir: OSPath, freq_hz: float = 10.0, acc_rate: float = 1.0) -> None:
+    store = zarr.DirectoryStore(os.path.join(output_dir, "replay_buffer.zarr"))
+    root = zarr.open(store, mode="w")
     episode_ends: List[int] = []
     timestamps: List[float] = []
     poses: List[Pose] = []
     actions: List[Pose] = []
-    for i, episode_path in enumerate(get_episodes_base_folders()):
-        episode = get_episode(episode_path)
-        video_parent_path = os.path.join(output_dir, 'videos', str(i))
-        Path(video_parent_path).mkdir(parents=True, exist_ok=True)
-        error = create_and_get_video_paths(episode['camera_0_paths'], video_parent_path, '0')
-        assert error == 0, episode_path
-        episode_poses = deepcopy(episode['poses'])
-        episode_timestampe = episode['timestamps']
-        poses.extend(
-            episode_poses[:-1]
-        )
-        actions.extend(
-            episode_poses[1:]
-        )
-        timestamps.extend(
-            episode_timestampe[:-1]
-        )
-        assert len(poses) == len(actions)
-        assert len(actions) == len(timestamps)
-        if len(episode_ends) == 0:
-            episode_end = len(episode_poses) - 1 
-        else:
-            episode_end = len(episode_poses) - 1 + episode_ends[-1]
-        episode_ends.append(episode_end)
-    assert len(set(timestamps)) == len(timestamps)
-    data_group = root.create_group('data')
-    data_group.create_dataset(
-        'action', data=np.array(actions), dtype='float64'
-    )
-    data_group.create_dataset(
-        'robot_pose', data=np.array(poses), dtype='float64'
-    )
-    data_group.create_dataset(
-        'timestamp', data=np.array(timestamps), dtype='float64'
-    )
-    meta_group = root.create_group('meta')
-    meta_group.create_dataset('episode_ends', data=np.array(episode_ends), dtype='int64')
-    root = zarr.open(store, mode='r')
-    print(root.tree()) 
-    print(root['data/timestamp'][:5])
-    print(root['data/action'][:5])
-    print(root['meta/episode_ends'][:])
+
+    for idx, ep_dir in enumerate(get_episode_folders(input_dir)):
+        episode = load_episode(OSPath(str(ep_dir)), freq_hz, acc_rate)
+        video_dir = Path(output_dir) / "videos" / str(idx)
+        video_dir.mkdir(parents=True, exist_ok=True)
+        error = create_video(episode.camera_0_paths, OSPath(str(video_dir)), "0")
+        assert error == 0, ep_dir
+
+        ep_poses = episode.poses
+        ep_ts = episode.timestamps
+        poses.extend(ep_poses[:-1])
+        actions.extend(ep_poses[1:])
+        timestamps.extend(ep_ts[:-1])
+        episode_ends.append(len(poses))
+
+    data_grp = root.create_group("data")
+    data_grp.create_dataset("action", data=np.array(actions), dtype="float64")
+    data_grp.create_dataset("robot_pose", data=np.array(poses), dtype="float64")
+    data_grp.create_dataset("timestamp", data=np.array(timestamps), dtype="float64")
+    meta_grp = root.create_group("meta")
+    meta_grp.create_dataset("episode_ends", data=np.array(episode_ends), dtype="int64")
 
 
-def main(output_dir: OSPath):
-    start(os.path.join(output_dir, 'push_cube_v2'))
-
-
-def test():
-    get_episode('/mnt/d/jiajingkai/episode/1725912649_39431882')
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Preprocess raw episodes")
+    parser.add_argument("input_dir", type=str, help="Directory containing raw episodes")
+    parser.add_argument("output_dir", type=str, help="Directory to store processed dataset")
+    parser.add_argument("--freq", type=float, default=10.0, help="Target frequency in Hz")
+    parser.add_argument("--acc", type=float, default=1.0, help="Acceleration rate")
+    args = parser.parse_args()
+    process_dataset(OSPath(args.input_dir), OSPath(args.output_dir), args.freq, args.acc)
 
 
 if __name__ == "__main__":
-    start(os.path.join('/mnt/d/zarr', 'ur5_push_block_v6'))
+    main()
