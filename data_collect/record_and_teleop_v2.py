@@ -17,7 +17,7 @@ LIN_VEL   = 0.04        # m/s
 ANG_VEL   = 0.30        # rad/s
 PUB_HZ    = 100         # Kinova 官方要求 100 Hz:contentReference[oaicite:1]{index=1}
 REC_HZ    = 10
-SAVE_DIR  = 'data_record'; os.makedirs(f'{SAVE_DIR}/color',exist_ok=True); os.makedirs(f'{SAVE_DIR}/depth',exist_ok=True)
+SAVE_DIR  = 'data_record'; os.makedirs(SAVE_DIR, exist_ok=True)
 CAM1_SN, CAM2_SN = "243122075526", "243222073031"
 
 # ───────── 键盘读取 ─────────
@@ -49,6 +49,10 @@ class Recorder(threading.Thread):
         super().__init__(daemon=True)
         self.tag, self.arm, self.stop_evt = tag, arm, threading.Event()
         self.pose, self.grip = [], []
+        self.root = os.path.join(SAVE_DIR, tag)
+        for cam in ('cam1', 'cam2'):
+            os.makedirs(os.path.join(self.root, cam, 'color'), exist_ok=True)
+            os.makedirs(os.path.join(self.root, cam, 'depth'), exist_ok=True)
     def run(self):
         period = 1/REC_HZ; idx=0
         while not self.stop_evt.is_set():
@@ -57,14 +61,18 @@ class Recorder(threading.Thread):
             g=self.arm.finger(); self.grip.append([(g[0]+g[1])/2])
             # image
             f1,f2=pipe1.wait_for_frames(),pipe2.wait_for_frames()
-            cv2.imwrite(f"{SAVE_DIR}/color/v1_{idx}_{self.tag}.png",np.asarray(f1.get_color_frame().get_data()))
-            cv2.imwrite(f"{SAVE_DIR}/depth/v1_{idx}_{self.tag}.png",np.asarray(f1.get_depth_frame().get_data()))
-            cv2.imwrite(f"{SAVE_DIR}/color/v2_{idx}_{self.tag}.png",np.asarray(f2.get_color_frame().get_data()))
-            cv2.imwrite(f"{SAVE_DIR}/depth/v2_{idx}_{self.tag}.png",np.asarray(f2.get_depth_frame().get_data()))
+            cv2.imwrite(os.path.join(self.root,'cam1','color',f'{idx:06d}.png'),
+                        np.asarray(f1.get_color_frame().get_data()))
+            cv2.imwrite(os.path.join(self.root,'cam1','depth',f'{idx:06d}.png'),
+                        np.asarray(f1.get_depth_frame().get_data()))
+            cv2.imwrite(os.path.join(self.root,'cam2','color',f'{idx:06d}.png'),
+                        np.asarray(f2.get_color_frame().get_data()))
+            cv2.imwrite(os.path.join(self.root,'cam2','depth',f'{idx:06d}.png'),
+                        np.asarray(f2.get_depth_frame().get_data()))
             idx+=1; time.sleep(max(0,period-(time.time()-t0)))
     def stop(self):
         self.stop_evt.set(); self.join()
-        np.save(f"{SAVE_DIR}/pos_{self.tag}.npy",
+        np.save(os.path.join(self.root, 'pos.npy'),
                 np.hstack((np.array(self.pose),np.array(self.grip))))
         print(f"[rec] 保存完毕 {self.tag}")
 
