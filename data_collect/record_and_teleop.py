@@ -13,7 +13,9 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from arm_kinova import Arm, LINEAR, ANG, GRIP, HOME_KEY   # 复用封装
 
 # ───────── 参数 ─────────
-HOME_POSE   = [0.213, -0.256, 0.508, 1.651, 1.115, 0.122]
+# HOME_POSE   = [0.213, -0.256, 0.508, 1.651, 1.115, 0.122]
+HOME_POSE   = [0.212, -0.256, 0.506, 1.664, 1.115, -1.694]
+
 LIN_VEL     = 0.8          # m/s  (≈4 cm/s)
 ANG_VEL     = 0.30          # rad/s(≈17°/s)
 SAVE_DIR    = 'data_record'; os.makedirs(f'{SAVE_DIR}/color', exist_ok=True); os.makedirs(f'{SAVE_DIR}/depth', exist_ok=True)
