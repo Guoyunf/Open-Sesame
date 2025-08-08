@@ -10,14 +10,15 @@ from matplotlib.widgets import Slider
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from scipy.spatial.transform import Rotation as R         # ⇐ 需要 scipy
 
-DATA_DIR   = 'data_record'
-SHOW_DEPTH = True
-CMAP       = cv2.COLORMAP_JET
-AXIS_LEN   = 0.03      # 三轴箭头长度 (m)
+DATA_DIR    = 'data_record'
+SHOW_DEPTH  = True
+SHOW_VIEW2  = False     # 同时显示第二视角
+CMAP        = cv2.COLORMAP_JET
+AXIS_LEN    = 0.03      # 三轴箭头长度 (m)
 
 # ----- 文件名正则 -----
 POS_RE = re.compile(r'pos_(.+?)\.npy$')
-IMG_RE = re.compile(r'v1_(\d+?)_(.+?)\.png$')    # idx, tag
+IMG_RE = re.compile(r'v\d_(\d+?)_(.+?)\.png$')    # idx, tag
 
 # ----- 扫描批次 -----
 pos_files = sorted(glob.glob(os.path.join(DATA_DIR, 'pos_*.npy')))
@@ -36,25 +37,41 @@ n_frames = xyz.shape[0]
 pattern = IMG_RE
 color_dict, depth_dict = {}, {}
 for p in glob.glob(os.path.join(DATA_DIR, f'color/v1_*_{tag}.png')):
-    m=pattern.search(os.path.basename(p)); idx=int(m.group(1)); typ='color'
-    color_dict[idx]=p
-    # 对应深度
-    dp = p.replace('/color/','/depth/').replace('v1_','v1_')
-    if os.path.exists(dp): depth_dict[idx]=dp
-color_paths =[color_dict[i] for i in sorted(color_dict)]
-depth_paths =[depth_dict[i] for i in sorted(depth_dict)] if SHOW_DEPTH else None
+    m = pattern.search(os.path.basename(p)); idx=int(m.group(1))
+    color_dict[idx] = p
+    dp = p.replace('/color/','/depth/')
+    if os.path.exists(dp): depth_dict[idx] = dp
+color_paths  = [color_dict[i] for i in sorted(color_dict)]
+depth_paths  = [depth_dict[i] for i in sorted(depth_dict)] if SHOW_DEPTH else None
+
+if SHOW_VIEW2:
+    color_dict2, depth_dict2 = {}, {}
+    for p in glob.glob(os.path.join(DATA_DIR, f'color/v2_*_{tag}.png')):
+        m = pattern.search(os.path.basename(p)); idx=int(m.group(1))
+        color_dict2[idx] = p
+        dp = p.replace('/color/','/depth/')
+        if os.path.exists(dp): depth_dict2[idx] = dp
+    color_paths2 = [color_dict2[i] for i in sorted(color_dict2)]
+    depth_paths2 = [depth_dict2[i] for i in sorted(depth_dict2)] if SHOW_DEPTH else None
+else:
+    color_paths2 = depth_paths2 = None
 
 # ---- 读取图像 ----
-def read_color(i): return cv2.cvtColor(cv2.imread(color_paths[i]), cv2.COLOR_BGR2RGB)
-def read_depth(i):
-    d16=cv2.imread(depth_paths[i],-1); lo,hi=np.percentile(d16[d16>0],(1,99)) if np.any(d16) else (0,1)
-    d8=cv2.convertScaleAbs(np.clip(d16,lo,hi),alpha=255/(hi-lo+1e-3))
-    return cv2.applyColorMap(d8,CMAP)[:,:,::-1]
+def read_color(paths, i):
+    return cv2.cvtColor(cv2.imread(paths[i]), cv2.COLOR_BGR2RGB)
+
+def read_depth(paths, i):
+    d16 = cv2.imread(paths[i], -1)
+    lo, hi = np.percentile(d16[d16>0], (1, 99)) if np.any(d16) else (0, 1)
+    d8  = cv2.convertScaleAbs(np.clip(d16, lo, hi), alpha=255/(hi - lo + 1e-3))
+    return cv2.applyColorMap(d8, CMAP)[:, :, ::-1]
 
 # ---- 画布 ----
-fig=plt.figure(figsize=(11,5))
-ax3d=fig.add_subplot(121,projection='3d')
-axim=fig.add_subplot(122); axim.axis('off')
+# 图像视图按行排列时需要更高的画布
+fig = plt.figure(figsize=(11, 5*(2 if SHOW_VIEW2 else 1)))
+ax3d = fig.add_subplot(121, projection='3d')
+axim = fig.add_subplot(122)
+axim.axis('off')
 fig.suptitle(f"Batch {tag}  |  frames={n_frames}")
 
 # 轨迹边界
@@ -71,7 +88,17 @@ coll = Line3DCollection(segments, colors=axis_colors, linewidths=2)
 ax3d.add_collection(coll)
 
 # --- 图像 ---
-img_disp = axim.imshow(read_color(0) if not SHOW_DEPTH else np.hstack((read_color(0), read_depth(0))))
+if SHOW_DEPTH:
+    rows = [np.hstack((read_color(color_paths,0), read_depth(depth_paths,0)))]
+    if SHOW_VIEW2:
+        rows.append(np.hstack((read_color(color_paths2,0), read_depth(depth_paths2,0))))
+    init_img = np.vstack(rows)
+else:
+    rows = [read_color(color_paths,0)]
+    if SHOW_VIEW2:
+        rows.append(read_color(color_paths2,0))
+    init_img = np.vstack(rows)
+img_disp = axim.imshow(init_img)
 
 # --- Slider & 交互 ---
 ax_sld=plt.axes([0.15,0.03,0.7,0.03]); sld=Slider(ax_sld,'Frame',0,n_frames-1,valinit=0,valstep=1)
@@ -100,9 +127,15 @@ def update(frame):
 
     # 图像
     if SHOW_DEPTH:
-        img_disp.set_data(np.hstack((read_color(idx), read_depth(idx))))
+        rows = [np.hstack((read_color(color_paths, idx), read_depth(depth_paths, idx)))]
+        if SHOW_VIEW2:
+            rows.append(np.hstack((read_color(color_paths2, idx), read_depth(depth_paths2, idx))))
+        img_disp.set_data(np.vstack(rows))
     else:
-        img_disp.set_data(read_color(idx))
+        rows = [read_color(color_paths, idx)]
+        if SHOW_VIEW2:
+            rows.append(read_color(color_paths2, idx))
+        img_disp.set_data(np.vstack(rows))
     return line_traj, coll, img_disp
 
 ani = FuncAnimation(fig, update, frames=n_frames, interval=33, blit=False, repeat=True)
