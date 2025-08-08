@@ -67,7 +67,8 @@ def read_depth(paths, i):
     return cv2.applyColorMap(d8, CMAP)[:, :, ::-1]
 
 # ---- 画布 ----
-fig = plt.figure(figsize=(16,5) if SHOW_VIEW2 else (11,5))
+# 图像视图按行排列时需要更高的画布
+fig = plt.figure(figsize=(11, 5*(2 if SHOW_VIEW2 else 1)))
 ax3d = fig.add_subplot(121, projection='3d')
 axim = fig.add_subplot(122)
 axim.axis('off')
@@ -88,15 +89,15 @@ ax3d.add_collection(coll)
 
 # --- 图像 ---
 if SHOW_DEPTH:
-    imgs = [np.hstack((read_color(color_paths,0), read_depth(depth_paths,0)))]
+    rows = [np.hstack((read_color(color_paths,0), read_depth(depth_paths,0)))]
     if SHOW_VIEW2:
-        imgs.append(np.hstack((read_color(color_paths2,0), read_depth(depth_paths2,0))))
-    init_img = np.hstack(imgs)
+        rows.append(np.hstack((read_color(color_paths2,0), read_depth(depth_paths2,0))))
+    init_img = np.vstack(rows)
 else:
-    imgs = [read_color(color_paths,0)]
+    rows = [read_color(color_paths,0)]
     if SHOW_VIEW2:
-        imgs.append(read_color(color_paths2,0))
-    init_img = np.hstack(imgs)
+        rows.append(read_color(color_paths2,0))
+    init_img = np.vstack(rows)
 img_disp = axim.imshow(init_img)
 
 # --- Slider & 交互 ---
@@ -126,15 +127,15 @@ def update(frame):
 
     # 图像
     if SHOW_DEPTH:
-        imgs = [np.hstack((read_color(color_paths, idx), read_depth(depth_paths, idx)))]
+        rows = [np.hstack((read_color(color_paths, idx), read_depth(depth_paths, idx)))]
         if SHOW_VIEW2:
-            imgs.append(np.hstack((read_color(color_paths2, idx), read_depth(depth_paths2, idx))))
-        img_disp.set_data(np.hstack(imgs))
+            rows.append(np.hstack((read_color(color_paths2, idx), read_depth(depth_paths2, idx))))
+        img_disp.set_data(np.vstack(rows))
     else:
-        imgs = [read_color(color_paths, idx)]
+        rows = [read_color(color_paths, idx)]
         if SHOW_VIEW2:
-            imgs.append(read_color(color_paths2, idx))
-        img_disp.set_data(np.hstack(imgs))
+            rows.append(read_color(color_paths2, idx))
+        img_disp.set_data(np.vstack(rows))
     return line_traj, coll, img_disp
 
 ani = FuncAnimation(fig, update, frames=n_frames, interval=33, blit=False, repeat=True)
