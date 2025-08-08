@@ -3,7 +3,7 @@
 """
 plot_trajectories.py
 --------------------
-读取 data_record/pos_*.npy → 动画播放 + 最终保存一张静态图
+读取 data_record/*/pos.npy → 动画播放 + 最终保存一张静态图
 """
 
 import glob, os, numpy as np, matplotlib.pyplot as plt
@@ -11,9 +11,9 @@ from matplotlib.animation import FuncAnimation
 
 # -------- 读取所有数据 --------
 DATA_DIR = 'data_record'
-files = sorted(glob.glob(os.path.join(DATA_DIR, 'pos_*.npy')))
+files = sorted(glob.glob(os.path.join(DATA_DIR, '*/pos.npy')))
 if not files:
-    raise FileNotFoundError("No pos_*.npy found in data_record/. Run the recorder first.")
+    raise FileNotFoundError("No */pos.npy found in data_record/. Run the recorder first.")
 
 trajectories = [np.load(f)[:, :3] for f in files]   # 仅取 X Y Z
 max_len      = max(t.shape[0] for t in trajectories)
