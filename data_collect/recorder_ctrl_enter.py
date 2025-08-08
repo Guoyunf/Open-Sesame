@@ -17,7 +17,7 @@ from arm_kinova import Arm, LINEAR, ANG, GRIP, HOME_KEY
 # -------- 参数 --------
 HOME_POSE =  [ 0.213, -0.256,  0.508,  1.651,  1.115,  0.122]
 
-SAVE_DIR = 'data_record'; os.makedirs(f'{SAVE_DIR}/color',exist_ok=True); os.makedirs(f'{SAVE_DIR}/depth',exist_ok=True)
+SAVE_DIR = 'data_record'; os.makedirs(SAVE_DIR, exist_ok=True)
 LOOP_HZ  = 10
 CAM1_SN, CAM2_SN = "243122075526", "243222073031"
 
@@ -56,6 +56,9 @@ class Recorder(threading.Thread):
         self.tag, self.arm = tag, arm
         self.stop_evt = threading.Event()
         self.pose, self.grip = [], []
+        self.base = os.path.join(SAVE_DIR, self.tag)
+        os.makedirs(os.path.join(self.base, 'color'), exist_ok=True)
+        os.makedirs(os.path.join(self.base, 'depth'), exist_ok=True)
     def run(self):
         idx, period = 0, 1/LOOP_HZ
         while not self.stop_evt.is_set():
@@ -64,20 +67,20 @@ class Recorder(threading.Thread):
             g = self.arm.finger(); self.grip.append([(g[0]+g[1])/2])
             # 保存图像
             f1,f2 = pipe1.wait_for_frames(), pipe2.wait_for_frames()
-            cv2.imwrite(f"{SAVE_DIR}/color/v1_{idx}_{self.tag}.png",
+            cv2.imwrite(os.path.join(self.base,'color',f"v1_{idx}.png"),
                         np.asarray(f1.get_color_frame().get_data()))
-            cv2.imwrite(f"{SAVE_DIR}/depth/v1_{idx}_{self.tag}.png",
+            cv2.imwrite(os.path.join(self.base,'depth',f"v1_{idx}.png"),
                         np.asarray(f1.get_depth_frame().get_data()))
-            cv2.imwrite(f"{SAVE_DIR}/color/v2_{idx}_{self.tag}.png",
+            cv2.imwrite(os.path.join(self.base,'color',f"v2_{idx}.png"),
                         np.asarray(f2.get_color_frame().get_data()))
-            cv2.imwrite(f"{SAVE_DIR}/depth/v2_{idx}_{self.tag}.png",
+            cv2.imwrite(os.path.join(self.base,'depth',f"v2_{idx}.png"),
                         np.asarray(f2.get_depth_frame().get_data()))
             idx += 1
             dt = time.time()-t0
             if dt < period: time.sleep(period-dt)
     def stop(self):
         self.stop_evt.set(); self.join()
-        np.save(f"{SAVE_DIR}/pos_{self.tag}.npy",
+        np.save(os.path.join(self.base,'pos.npy'),
                 np.hstack((np.array(self.pose), np.array(self.grip))))
         print(f"[rec] 保存完毕 {self.tag}")
 

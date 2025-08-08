@@ -16,33 +16,34 @@ CMAP       = cv2.COLORMAP_JET
 AXIS_LEN   = 0.03      # 三轴箭头长度 (m)
 
 # ----- 文件名正则 -----
-POS_RE = re.compile(r'pos_(.+?)\.npy$')
-IMG_RE = re.compile(r'v1_(\d+?)_(.+?)\.png$')    # idx, tag
+IMG_RE = re.compile(r'v1_(\d+)\.png$')    # idx
 
 # ----- 扫描批次 -----
-pos_files = sorted(glob.glob(os.path.join(DATA_DIR, 'pos_*.npy')))
-if not pos_files: raise FileNotFoundError("no pos_*.npy ; run recorder first")
+pos_files = sorted(glob.glob(os.path.join(DATA_DIR, '*/pos.npy')))
+if not pos_files: raise FileNotFoundError("no */pos.npy ; run recorder first")
 
-tags = [POS_RE.search(os.path.basename(f)).group(1) for f in pos_files]
+tags = [os.path.basename(os.path.dirname(f)) for f in pos_files]
 for i,t in enumerate(tags): print(f"[{i}] {t}")
 tag = tags[int(input(f"Select batch 0-{len(tags)-1}: "))]
 
 # ----- 载入位姿 (X Y Z R P Y) -----
-pose6 = np.load(os.path.join(DATA_DIR, f'pos_{tag}.npy'))[:, :6]
+pose6 = np.load(os.path.join(DATA_DIR, tag, 'pos.npy'))[:, :6]
 xyz = pose6[:, :3]; rpy = pose6[:, 3:]
 n_frames = xyz.shape[0]
 
 # ----- 图片路径 -----
 pattern = IMG_RE
-color_dict, depth_dict = {}, {}
-for p in glob.glob(os.path.join(DATA_DIR, f'color/v1_*_{tag}.png')):
-    m=pattern.search(os.path.basename(p)); idx=int(m.group(1)); typ='color'
-    color_dict[idx]=p
-    # 对应深度
-    dp = p.replace('/color/','/depth/').replace('v1_','v1_')
-    if os.path.exists(dp): depth_dict[idx]=dp
-color_paths =[color_dict[i] for i in sorted(color_dict)]
-depth_paths =[depth_dict[i] for i in sorted(depth_dict)] if SHOW_DEPTH else None
+color_paths = sorted(
+    glob.glob(os.path.join(DATA_DIR, tag, 'color', 'v1_*.png')),
+    key=lambda p: int(pattern.search(os.path.basename(p)).group(1))
+)
+if SHOW_DEPTH:
+    depth_paths = [
+        p.replace(os.sep+'color'+os.sep, os.sep+'depth'+os.sep)
+        for p in color_paths
+    ]
+else:
+    depth_paths = None
 
 # ---- 读取图像 ----
 def read_color(i): return cv2.cvtColor(cv2.imread(color_paths[i]), cv2.COLOR_BGR2RGB)
