@@ -5,7 +5,7 @@ import pyrealsense2 as rs
 import os
 
 # 定义保存目录
-save_dir = "captured_images"
+save_dir = "captured_images3"
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 

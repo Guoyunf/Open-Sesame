@@ -1,0 +1,19 @@
+version: '3.3'
+
+services:
+    base:
+      image: saturn_ros2:100
+      container_name: saturn_ros2
+      privileged: true
+      tty: true
+      stdin_open: true
+      network_mode: host
+      ipc: host
+      environment:
+       - DISPLAY
+       - QT_X11_NO_MITSHM=1
+       - XDG_RUNTIME_DIR
+      volumes:
+       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+       - /dev:/dev
+      command: bash -c "source /opt/ros/galactic/setup.bash && source /root/saturn_ros2/install/setup.bash && ros2 launch saturn_controller saturn_ros2.launch.py"
