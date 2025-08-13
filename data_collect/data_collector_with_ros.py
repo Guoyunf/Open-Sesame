@@ -23,7 +23,9 @@ DATA_FOLDER = "./data/arm_5/"  # 保存数据的目录
 # -------------------------------------------
 
 # 全局变量：当前机械臂位姿 [x, y, z, rx, ry, rz]
+# 以及夹爪开合度（记录两指的平均值）
 current_cartesian_command = [0.0] * 6
+current_gripper = [0.0]
 
 
 def set_current_cartesian_command(feedback):
@@ -39,17 +41,28 @@ def set_current_cartesian_command(feedback):
     current_cartesian_command[5] = feedback.ThetaZ
 
 
+def set_current_gripper(feedback):
+    """更新夹爪开合度"""
+    current_gripper[0] = (feedback.finger1 + feedback.finger2) / 2.0
+
+
 def init_ros_pose_listener():
     """
     初始化 ROS 订阅，获取 Kinova 当前位姿。
     """
-    topic_address = "/" + ROBOT_PREFIX + "driver/out/cartesian_command"
-    rospy.loginfo("正在订阅机械臂位姿主题: " + topic_address)
+    topic_pose = "/" + ROBOT_PREFIX + "driver/out/cartesian_command"
+    rospy.loginfo("正在订阅机械臂位姿主题: " + topic_pose)
     rospy.Subscriber(
-        topic_address, kinova_msgs.msg.KinovaPose, set_current_cartesian_command
+        topic_pose, kinova_msgs.msg.KinovaPose, set_current_cartesian_command
     )
-    rospy.wait_for_message(topic_address, kinova_msgs.msg.KinovaPose, timeout=5.0)
+    rospy.wait_for_message(topic_pose, kinova_msgs.msg.KinovaPose, timeout=5.0)
     rospy.loginfo("成功接收到初始位姿数据。")
+
+    topic_grip = "/" + ROBOT_PREFIX + "driver/out/finger_position"
+    rospy.loginfo("正在订阅夹爪状态主题: " + topic_grip)
+    rospy.Subscriber(topic_grip, kinova_msgs.msg.FingerPosition, set_current_gripper)
+    rospy.wait_for_message(topic_grip, kinova_msgs.msg.FingerPosition, timeout=5.0)
+    rospy.loginfo("成功接收到初始夹爪数据。")
 
 
 def data_collection(data_folder):
@@ -71,11 +84,12 @@ def data_collection(data_folder):
         key = cv2.waitKey(30) & 0xFF
         if key == ord("s"):
             pose = current_cartesian_command.copy()
-            print(f"[INFO] Saved pose_{count}: {pose}")
+            grip_val = current_gripper[0]
+            print(f"[INFO] Saved pose_{count}: {pose}  grip={grip_val:.1f}")
 
-            # 保存姿态
+            # 保存姿态和夹爪
             with open(os.path.join(data_folder, "poses.txt"), "a+") as f:
-                pose_line = ",".join([str(p) for p in pose]) + "\n"
+                pose_line = ",".join([str(p) for p in pose] + [str(grip_val)]) + "\n"
                 f.write(pose_line)
 
             # 保存图像
