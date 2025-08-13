@@ -3,19 +3,19 @@
 """
 plot_trajectories.py
 --------------------
-读取 data_record/pos_*.npy → 动画播放 + 最终保存一张静态图
+读取 ``data_record/<tag>/pos.npy`` → 动画播放 + 最终保存一张静态图
 """
 
-import glob, os, numpy as np, matplotlib.pyplot as plt
+import os, numpy as np, matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 # -------- 读取所有数据 --------
 DATA_DIR = 'data_record'
-files = sorted(glob.glob(os.path.join(DATA_DIR, 'pos_*.npy')))
-if not files:
-    raise FileNotFoundError("No pos_*.npy found in data_record/. Run the recorder first.")
+dirs = sorted([d for d in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, d))])
+if not dirs:
+    raise FileNotFoundError("No recordings found in data_record/. Run the recorder first.")
 
-trajectories = [np.load(f)[:, :3] for f in files]   # 仅取 X Y Z
+trajectories = [np.load(os.path.join(DATA_DIR, d, 'pos.npy'))[:, :3] for d in dirs]
 max_len      = max(t.shape[0] for t in trajectories)
 
 # -------- 画布设置 --------

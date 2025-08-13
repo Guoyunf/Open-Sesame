@@ -7,34 +7,30 @@ replay_to_robot.py
 同时复现录制时的夹爪开合。
 """
 
-import glob, sys, os, re, time, argparse, numpy as np
+import glob, sys, os, time, argparse, numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from arm_kinova import Arm
 
 DATA_DIR = 'data_record'
-POS_RE   = re.compile(r'pos_(.+?)\.npy$')
-HZ       = 10           # 回放频率 (与数据采集一致)
+HZ       = 30           # 录制时 10 Hz
 DT       = 1 / HZ
 
 def pick_batch() -> str:
-    files = sorted(glob.glob(os.path.join(DATA_DIR, 'pos_*.npy')))
-    if not files: raise FileNotFoundError("No pos_*.npy found, record first.")
-    tags = [POS_RE.search(os.path.basename(f)).group(1) for f in files]
+    dirs = sorted([d for d in os.listdir(DATA_DIR)
+                   if os.path.isdir(os.path.join(DATA_DIR, d))])
+    if not dirs:
+        raise FileNotFoundError("No recordings found, record first.")
     print("Available batches:")
-    for i, t in enumerate(tags): print(f"[{i}] {t}")
-    idx = int(input(f"Select batch 0-{len(tags)-1}: "))
-    return tags[idx]
+    for i, t in enumerate(dirs):
+        print(f"[{i}] {t}")
+    idx = int(input(f"Select batch 0-{len(dirs)-1}: "))
+    return dirs[idx]
 
 def main(tag: str, dry_run: bool):
-    path = os.path.join(DATA_DIR, f'pos_{tag}.npy')
-    data = np.load(path)
-    pose = data[:, :6]                 # X Y Z R P Y
-    grip = data[:, 6] if data.shape[1] > 6 else None
-    if grip is None:
-        print(f"Loaded {pose.shape[0]} waypoints from {path} (no gripper data)")
-    else:
-        print(f"Loaded {pose.shape[0]} waypoints from {path} with gripper track")
+    path = os.path.join(DATA_DIR, tag, 'pos.npy')
+    traj = np.load(path)[:, :6]        # X Y Z R P Y
+    print(f"Loaded {traj.shape[0]} waypoints from {path}")
 
     if dry_run:
         print("Dry-run only → no motion commands will be sent.")
