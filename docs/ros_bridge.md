@@ -9,7 +9,7 @@ the ROS1/ROS2 bridge. Run the blocks in separate terminals as noted.
 xhost +
 ```
 
-## in kinova docker 
+## in kinova_noetic_intersense docker
 ```bash
 # Terminal 1: ROS1 environmentx
 # in base
