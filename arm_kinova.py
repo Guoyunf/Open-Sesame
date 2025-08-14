@@ -21,6 +21,7 @@ import sys, os, math, time, select, termios, tty, threading, yaml, rospy, action
 import numpy as np
 from std_msgs.msg import Header
 from geometry_msgs.msg import Point, Quaternion, PoseStamped, Twist
+from sensor_msgs.msg import JointState
 
 # ─────────────────── 速度消息类型自动选择 ────────────────────
 _vel_cls, _KINOVA_FIELDS = None, None
@@ -56,6 +57,7 @@ _euler_fb      = lambda p: f"{_ns(p)}/out/cartesian_command"
 _quat_fb       = lambda p: f"{_ns(p)}/out/tool_pose"
 _finger_fb     = lambda p: f"{_ns(p)}/out/finger_position"
 _vel_topic     = lambda p: f"{_ns(p)}/in/cartesian_velocity"
+_joint_topic   = lambda p: f"{_ns(p)}/out/joint_state"
 
 from utils.lib_math import euler_to_quaternion_zyx
 
@@ -103,12 +105,15 @@ class Arm:
             rospy.init_node('arm_keyboard', anonymous=True, disable_signals=True)
         self.prefix, self.g_open, self.g_close = prefix, g_open, g_close
         self.cam2base_H = self._load_csv_matrix("cfg/cam2base_H.csv")
-        self._pose=[0.]*6; self._finger=[0.]*3; self._lock=threading.Lock()
+        self._pose=[0.]*6; self._finger=[0.]*3
+        self._joint_pos=[]; self._joint_eff=[]
+        self._lock=threading.Lock()
 
         import kinova_msgs.msg as km
         rospy.Subscriber(_euler_fb(prefix), km.KinovaPose, self._cb_pose)
         rospy.Subscriber(_finger_fb(prefix), km.FingerPosition, self._cb_finger)
         rospy.Subscriber(_quat_fb(prefix), PoseStamped, lambda _:None)
+        rospy.Subscriber(_joint_topic(prefix), JointState, self._cb_joint)
 
         self._pose_cli = actionlib.SimpleActionClient(_pose_action(prefix), km.ArmPoseAction)
         self._grip_cli = actionlib.SimpleActionClient(_finger_action(prefix), km.SetFingersPositionAction)
@@ -128,12 +133,18 @@ class Arm:
     def _cb_finger(self, m):
         with self._lock:
             self._finger=[m.finger1,m.finger2,m.finger3]
+    def _cb_joint(self, m):
+        with self._lock:
+            self._joint_pos=list(m.position)
+            self._joint_eff=list(m.effort)
 
     # 基本读接口
     def pose(self):  
         with self._lock: return self._pose.copy()
-    def finger(self): 
+    def finger(self):
         with self._lock: return self._finger.copy()
+    def joint(self):
+        with self._lock: return self._joint_pos.copy(), self._joint_eff.copy()
 
     # 增量位姿
     def send_delta(self, dx=0,dy=0,dz=0, dR=0,dP=0,dY=0):
