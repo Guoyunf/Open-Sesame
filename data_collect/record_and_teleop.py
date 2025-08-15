@@ -22,6 +22,7 @@ SAVE_DIR    = 'data_record'; os.makedirs(SAVE_DIR, exist_ok=True)
 REC_HZ      = 30
 PUB_HZ      = 100           # 必须 100 Hz :contentReference[oaicite:1]{index=1}
 CAM1_SN, CAM2_SN = "243122075526", "243222073031"
+REC_JOINT  = True           # 是否记录关节角度与力矩
 
 # ---- 非阻塞读取单键（含方向键） ----
 def get_key(timeout=0.01):
@@ -55,6 +56,8 @@ class Recorder(threading.Thread):
         self.tag, self.arm = tag, arm
         self.stop_evt = threading.Event()
         self.pose, self.grip = [], []
+        if REC_JOINT:
+            self.joint_pos, self.joint_eff = [], []
         self.root = os.path.join(SAVE_DIR, tag)
         for cam in ('cam1', 'cam2'):
             os.makedirs(os.path.join(self.root, cam, 'color'), exist_ok=True)
@@ -65,6 +68,8 @@ class Recorder(threading.Thread):
             t0 = time.time()
             self.pose.append(self.arm.pose())
             g = self.arm.finger(); self.grip.append([ (g[0]+g[1]) / 2 ])
+            if REC_JOINT:
+                jp, je = self.arm.joint(); self.joint_pos.append(jp); self.joint_eff.append(je)
             f1, f2 = pipe1.wait_for_frames(), pipe2.wait_for_frames()
             cv2.imwrite(os.path.join(self.root, 'cam1', 'color', f'{idx:06d}.png'),
                         np.asarray(f1.get_color_frame().get_data()))
@@ -79,6 +84,9 @@ class Recorder(threading.Thread):
         self.stop_evt.set(); self.join()
         np.save(os.path.join(self.root, 'pos.npy'),
                 np.hstack((np.array(self.pose), np.array(self.grip))))
+        if REC_JOINT and getattr(self, 'joint_pos', []):
+            np.save(os.path.join(self.root, 'joint.npy'),
+                    np.hstack((np.array(self.joint_pos), np.array(self.joint_eff))))
         print(f"[rec] 保存完毕 {self.tag}")
 
 # ---- 主程序 ----
