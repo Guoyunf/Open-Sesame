@@ -3,8 +3,8 @@
 """
 plot_joint_states.py
 --------------------
-读取 ``data_record/<tag>/joint.npy`` 并与参考轨迹比较。
-若末端关节差异超过阈值，则提示需要重试。
+读取 ``data_record/<tag>/joint.npy`` 并绘制关节位置和力矩轨迹。
+可输入一个或多个目录进行对比展示。
 """
 
 import os
@@ -28,34 +28,29 @@ def plot_joint(pos, eff, label, ax):
     ax[0].set_ylabel('position')
     ax[1].set_ylabel('effort')
     ax[1].set_xlabel('frame')
-    ax[0].legend(loc='upper right', fontsize='small')
-    ax[1].legend(loc='upper right', fontsize='small')
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('reference', help='成功示教的目录')
-    ap.add_argument('attempt', help='本次尝试的目录')
-    ap.add_argument('--threshold', type=float, default=0.1,
-                    help='末端关节位置差阈值')
+    ap.add_argument('paths', nargs='+', help='包含 joint.npy 的目录')
+    ap.add_argument('--labels', nargs='*', help='对应目录的标签')
     args = ap.parse_args()
 
-    ref_pos, ref_eff = load_joint(args.reference)
-    att_pos, att_eff = load_joint(args.attempt)
+    if args.labels and len(args.labels) != len(args.paths):
+        ap.error('标签数量需与目录数量一致')
 
     fig, ax = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-    plot_joint(ref_pos, ref_eff, 'ref', ax)
-    plot_joint(att_pos, att_eff, 'att', ax)
+    for i, path in enumerate(args.paths):
+        pos, eff = load_joint(path)
+        label = args.labels[i] if args.labels else os.path.basename(path.rstrip('/'))
+        plot_joint(pos, eff, label, ax)
+
     ax[0].set_title('Joint Position')
     ax[1].set_title('Joint Effort')
+    ax[0].legend(loc='upper right', fontsize='small')
+    ax[1].legend(loc='upper right', fontsize='small')
     plt.tight_layout()
     plt.show()
-
-    diff = np.abs(ref_pos[-1] - att_pos[-1]).max()
-    if diff > args.threshold:
-        print(f'差异 {diff:.3f} > 阈值 {args.threshold}, 判定失败, 请重试')
-    else:
-        print(f'差异 {diff:.3f} <= 阈值 {args.threshold}, 判定成功')
 
 
 if __name__ == '__main__':
