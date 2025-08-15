@@ -49,6 +49,7 @@ class Recorder(threading.Thread):
         super().__init__(daemon=True)
         self.tag, self.arm, self.stop_evt = tag, arm, threading.Event()
         self.pose, self.grip = [], []
+        self.joint_pos, self.joint_eff = [], []
         self.root = os.path.join(SAVE_DIR, tag)
         for cam in ('cam1', 'cam2'):
             os.makedirs(os.path.join(self.root, cam, 'color'), exist_ok=True)
@@ -59,6 +60,7 @@ class Recorder(threading.Thread):
             t0=time.time()
             self.pose.append(self.arm.pose())
             g=self.arm.finger(); self.grip.append([(g[0]+g[1])/2])
+            jp, je = self.arm.joint(); self.joint_pos.append(jp); self.joint_eff.append(je)
             # image
             f1,f2=pipe1.wait_for_frames(),pipe2.wait_for_frames()
             cv2.imwrite(os.path.join(self.root,'cam1','color',f'{idx:06d}.png'),
@@ -74,6 +76,9 @@ class Recorder(threading.Thread):
         self.stop_evt.set(); self.join()
         np.save(os.path.join(self.root, 'pos.npy'),
                 np.hstack((np.array(self.pose),np.array(self.grip))))
+        if self.joint_pos:
+            np.save(os.path.join(self.root, 'joint.npy'),
+                    np.hstack((np.array(self.joint_pos), np.array(self.joint_eff))))
         print(f"[rec] 保存完毕 {self.tag}")
 
 # ───────── 主循环 ─────────
