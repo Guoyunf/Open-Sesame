@@ -16,3 +16,10 @@ away, a negative value is considered normal, and a zero effort is resolved by
 looking back at previous non‑zero measurements. If an error is detected during
 the pull phase, the state machine automatically retries the entire sequence up
 to three times before giving up.
+
+A high-level helper `open_door` combines this state machine with camera-based
+handle detection and coordinate transformation. The handle location can be
+obtained either by manually clicking in the camera image or by plugging in a
+vision model. Detected coordinates are converted from the camera frame to the
+robot's base frame via `Arm.target2cam_xyzrpy_to_target2base_xyzrpy`, and all
+poses are configured using values from `cfg/cfg_door_open.yaml`.

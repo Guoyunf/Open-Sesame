@@ -20,21 +20,31 @@ class DoorOpenStateMachine:
     DONE = "done"
     ERROR = "error"
 
-    def __init__(self, arm: Any, base: Any, max_attempts: int = 3):
+    def __init__(
+        self,
+        arm: Any,
+        base: Any,
+        max_attempts: int = 3,
+        base_move_duration: float = 2.0,
+        base_move_velocity: float = 0.2,
+    ):
         self.arm = arm
         self.base = base
         self.max_attempts = max_attempts
+        self.base_move_duration = base_move_duration
+        self.base_move_velocity = base_move_velocity
         self.state = self.APPROACH
         self.joint3_history: List[float] = []
 
-    def run(self, target_pose: Sequence[float]) -> str:
+    def run(self, grasp_pose: Sequence[float], pull_pose: Sequence[float]) -> str:
         """Run the state machine until completion or error.
 
         Parameters
         ----------
-        target_pose:
-            Pose used in the approach phase. The meaning of the values depends on
-            the arm controller, but typically corresponds to ``[x, y, z, r, p, y]``.
+        grasp_pose:
+            Pose used in the approach phase.
+        pull_pose:
+            Pose used for the downward pull after grasping.
 
         Returns
         -------
@@ -47,19 +57,25 @@ class DoorOpenStateMachine:
             self.joint3_history.clear()
             while self.state not in (self.DONE, self.ERROR):
                 if self.state == self.APPROACH:
-                    approach_handle(self.arm, target_pose)
+                    approach_handle(self.arm, grasp_pose)
                     self.state = self.GRASP
                 elif self.state == self.GRASP:
                     grasp_handle(self.arm)
                     self.state = self.PULL
                 elif self.state == self.PULL:
-                    error, _ = pull_handle_and_check(self.arm, self.joint3_history)
+                    error, _ = pull_handle_and_check(
+                        self.arm, self.joint3_history, pull_pose
+                    )
                     if error:
                         self.state = self.ERROR
                     else:
                         self.state = self.MOVE_BASE
                 elif self.state == self.MOVE_BASE:
-                    move_base_backward(self.base)
+                    move_base_backward(
+                        self.base,
+                        duration=self.base_move_duration,
+                        linear_velocity=self.base_move_velocity,
+                    )
                     self.state = self.DONE
             if self.state == self.DONE:
                 return self.DONE

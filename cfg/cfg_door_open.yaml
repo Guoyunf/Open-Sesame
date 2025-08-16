@@ -1,0 +1,10 @@
+grasp_orientation:
+  roll: 1.512
+  pitch: -0.184
+  yaw: -1.422
+pull_down_distance: 0.12
+base_move:
+  duration: 2.0
+  linear_velocity: 0.2
+state_machine:
+  max_attempts: 3

@@ -1,17 +1,20 @@
 """Primitive to pull the door handle and monitor joint effort."""
 
-from typing import Any, List, Tuple
+from typing import Any, List, Sequence, Tuple
 
 
-def pull_handle(arm: Any, dz: float = -0.05) -> float:
-    """Pull the handle downwards and return joint3 effort.
+def pull_handle(arm: Any, target_pose: Sequence[float]) -> float:
+    """Move to ``target_pose`` and return joint3 effort.
+
+    This mirrors ``main_open_door.py`` which commands an absolute pose using
+    ``move_p`` rather than incremental deltas.
 
     Parameters
     ----------
     arm:
-        Arm-like object with ``send_delta`` and ``joint`` methods.
-    dz:
-        Incremental distance along negative Z to pull the handle.
+        Arm-like object with ``move_p`` and ``joint`` methods.
+    target_pose:
+        Absolute pose ``[x, y, z, r, p, y]`` to reach during the pull action.
 
     Returns
     -------
@@ -21,8 +24,8 @@ def pull_handle(arm: Any, dz: float = -0.05) -> float:
     if arm is None:
         return 0.0
 
-    if hasattr(arm, "send_delta"):
-        arm.send_delta(dz=dz)
+    if hasattr(arm, "move_p"):
+        arm.move_p(list(target_pose))
 
     effort = 0.0
     if hasattr(arm, "joint"):
@@ -62,7 +65,9 @@ def evaluate_joint3_effort(current: float, history: List[float]) -> bool:
     return False
 
 
-def pull_handle_and_check(arm: Any, history: List[float]) -> Tuple[bool, float]:
+def pull_handle_and_check(
+    arm: Any, history: List[float], target_pose: Sequence[float]
+) -> Tuple[bool, float]:
     """Perform the pull action and check for errors.
 
     Parameters
@@ -71,13 +76,15 @@ def pull_handle_and_check(arm: Any, history: List[float]) -> Tuple[bool, float]:
         Arm-like object.
     history:
         Mutable list storing past joint3 efforts.
+    target_pose:
+        Absolute pose for the pull motion.
 
     Returns
     -------
     Tuple[bool, float]
         ``(error_detected, current_effort)``.
     """
-    effort = pull_handle(arm)
+    effort = pull_handle(arm, target_pose)
     error = evaluate_joint3_effort(effort, history)
     history.append(effort)
     if len(history) > 50:
