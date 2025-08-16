@@ -3,12 +3,10 @@
 from typing import Any
 
 
-def move_base_backward(base: Any, distance: float = 0.2) -> None:
-    """Move the base backward to help open the door."""
+def move_base_backward(base: Any, duration: float = 2.0, linear_velocity: float = 0.2) -> None:
+    """Move the base backward using the existing ``move_T`` API."""
     if base is None:
         return
 
-    if hasattr(base, "move_by"):
-        base.move_by(-distance, 0.0, 0.0)
-    elif hasattr(base, "send_velocity"):
-        base.send_velocity(-abs(distance), 0.0, 0.0)
+    if hasattr(base, "move_T"):
+        base.move_T(-abs(duration), linear_velocity=linear_velocity)
