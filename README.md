@@ -16,11 +16,12 @@ away, a negative value is considered normal, and a zero effort is resolved by
 looking back at previous non‑zero measurements. During the pull, a background
 thread continuously logs the joint effort to ``joint3_effort_attempt<i>.txt`` so
 that the entire trajectory can be inspected later. After a successful pull, the
-mobile base drives backward briefly to swing the door open. If an error is
-detected during the pull phase, the state machine automatically retries the
-entire sequence up to three times before giving up. On each failed attempt, the
-gripper first retreats about 20 cm along the +Y axis before re-approaching the
-handle.
+mobile base drives backward briefly to swing the door open. This base retreat is
+part of the normal opening operation and is skipped when a pull fails. If an
+error is detected during the pull phase, the state machine automatically retries
+the entire sequence up to three times before giving up. On each failed attempt,
+the gripper first retreats about 20 cm along the +Y axis before re-approaching
+the handle while the base remains stationary.
 
 A high-level helper `open_door` combines this state machine with camera-based
 handle detection and coordinate transformation. The handle location can be
