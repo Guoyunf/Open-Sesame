@@ -1,38 +1,38 @@
 """Primitive to pull the door handle and monitor joint effort."""
 
-from typing import Any, List, Sequence, Tuple
+from typing import Any, List, Sequence, Tuple, Optional
+import threading
+import time
 
 
-def pull_handle(arm: Any, target_pose: Sequence[float]) -> float:
-    """Move to ``target_pose`` and return joint3 effort.
+class Joint3EffortRecorder(threading.Thread):
+    """Continuously sample joint3 effort in a background thread."""
 
-    This mirrors ``main_open_door.py`` which commands an absolute pose using
-    ``move_p`` rather than incremental deltas.
+    def __init__(self, arm: Any, interval: float = 0.01) -> None:
+        super().__init__(daemon=True)
+        self.arm = arm
+        self.interval = interval
+        self.data: List[float] = []
+        self._stop_event = threading.Event()
 
-    Parameters
-    ----------
-    arm:
-        Arm-like object with ``move_p`` and ``joint`` methods.
-    target_pose:
-        Absolute pose ``[x, y, z, r, p, y]`` to reach during the pull action.
+    def run(self) -> None:  # pragma: no cover - requires hardware
+        while not self._stop_event.is_set():
+            if hasattr(self.arm, "joint"):
+                _, eff = self.arm.joint()
+                if len(eff) >= 3:
+                    self.data.append(eff[2])
+            time.sleep(self.interval)
 
-    Returns
-    -------
-    float
-        Effort of joint3 after motion. ``0.0`` if unavailable.
-    """
+    def stop(self) -> None:
+        self._stop_event.set()
+
+
+def pull_handle(arm: Any, target_pose: Sequence[float]) -> None:
+    """Move to ``target_pose`` using ``move_p``."""
     if arm is None:
-        return 0.0
-
+        return
     if hasattr(arm, "move_p"):
         arm.move_p(list(target_pose))
-
-    effort = 0.0
-    if hasattr(arm, "joint"):
-        _, eff = arm.joint()
-        if len(eff) >= 3:
-            effort = eff[2]
-    return effort
 
 
 def evaluate_joint3_effort(current: float, history: List[float]) -> bool:
@@ -66,7 +66,10 @@ def evaluate_joint3_effort(current: float, history: List[float]) -> bool:
 
 
 def pull_handle_and_check(
-    arm: Any, history: List[float], target_pose: Sequence[float]
+    arm: Any,
+    history: List[float],
+    target_pose: Sequence[float],
+    log_path: Optional[str] = None,
 ) -> Tuple[bool, float]:
     """Perform the pull action and check for errors.
 
@@ -84,9 +87,26 @@ def pull_handle_and_check(
     Tuple[bool, float]
         ``(error_detected, current_effort)``.
     """
-    effort = pull_handle(arm, target_pose)
-    error = evaluate_joint3_effort(effort, history)
-    history.append(effort)
-    if len(history) > 50:
-        history.pop(0)
-    return error, effort
+    recorder = Joint3EffortRecorder(arm)
+    recorder.start()
+    try:
+        pull_handle(arm, target_pose)
+    finally:  # pragma: no branch - ensure recorder stops
+        recorder.stop()
+        recorder.join()
+
+    history.extend(recorder.data)
+    current = history[-1] if history else 0.0
+    error = evaluate_joint3_effort(current, history[:-1])
+
+    if log_path is not None:
+        try:
+            with open(log_path, "w", encoding="utf-8") as f:
+                for value in recorder.data:
+                    f.write(f"{value}\n")
+        except OSError:
+            pass
+
+    if len(history) > 200:
+        del history[:-200]
+    return error, current

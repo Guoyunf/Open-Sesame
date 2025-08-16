@@ -63,8 +63,9 @@ class DoorOpenStateMachine:
                     grasp_handle(self.arm)
                     self.state = self.PULL
                 elif self.state == self.PULL:
+                    log_path = f"joint3_effort_attempt{attempts}.txt"
                     error, _ = pull_handle_and_check(
-                        self.arm, self.joint3_history, pull_pose
+                        self.arm, self.joint3_history, pull_pose, log_path
                     )
                     if error:
                         self.state = self.ERROR

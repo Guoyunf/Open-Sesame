@@ -13,9 +13,11 @@ primitives in the `primitives` package to open a door. The pull primitive
 monitors the effort of joint 3 to determine whether the door handle has been
 accidentally released: a positive effort indicates the handle has been dragged
 away, a negative value is considered normal, and a zero effort is resolved by
-looking back at previous non‑zero measurements. If an error is detected during
-the pull phase, the state machine automatically retries the entire sequence up
-to three times before giving up.
+looking back at previous non‑zero measurements. During the pull, a background
+thread continuously logs the joint effort to ``joint3_effort_attempt<i>.txt`` so
+that the entire trajectory can be inspected later. If an error is detected
+during the pull phase, the state machine automatically retries the entire
+sequence up to three times before giving up.
 
 A high-level helper `open_door` combines this state machine with camera-based
 handle detection and coordinate transformation. The handle location can be
