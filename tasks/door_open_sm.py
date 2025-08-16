@@ -6,6 +6,7 @@ from primitives import (
     approach_handle,
     grasp_handle,
     retreat_gripper,
+    retreat_base,
     pull_handle_and_check,
 )
 
@@ -16,7 +17,7 @@ class DoorOpenStateMachine:
     APPROACH = "approach"
     GRASP = "grasp"
     PULL = "pull"
-    RETRACT = "retract"
+    MOVE_BASE = "move_base"
     DONE = "done"
     ERROR = "error"
 
@@ -25,13 +26,15 @@ class DoorOpenStateMachine:
         arm: Any,
         base: Any,
         max_attempts: int = 3,
-        retreat_distance: float = 0.2,
+        base_backoff_time: float = 2.0,
+        base_backoff_velocity: float = 0.2,
         retry_backoff_distance: float = 0.2,
     ):
         self.arm = arm
         self.base = base
         self.max_attempts = max_attempts
-        self.retreat_distance = retreat_distance
+        self.base_backoff_time = base_backoff_time
+        self.base_backoff_velocity = base_backoff_velocity
         self.retry_backoff_distance = retry_backoff_distance
         self.state = self.APPROACH
         self.joint3_history: List[float] = []
@@ -70,9 +73,13 @@ class DoorOpenStateMachine:
                     if error:
                         self.state = self.ERROR
                     else:
-                        self.state = self.RETRACT
-                elif self.state == self.RETRACT:
-                    retreat_gripper(self.arm, self.retreat_distance)
+                        self.state = self.MOVE_BASE
+                elif self.state == self.MOVE_BASE:
+                    retreat_base(
+                        self.base,
+                        self.base_backoff_time,
+                        self.base_backoff_velocity,
+                    )
                     self.state = self.DONE
             if self.state == self.DONE:
                 return self.DONE

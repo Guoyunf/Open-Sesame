@@ -22,7 +22,7 @@ def open_door(
     ----------
     cfg_path:
         Path to the YAML configuration describing grasp orientation, pull distance,
-        arm retreat and retry settings.
+        base retreat and retry settings.
     use_model:
         If ``True`` the vision model path/name in ``model`` is used for detection,
         otherwise manual clicking is performed.
@@ -63,7 +63,8 @@ def open_door(
         arm,
         base,
         max_attempts=cfg.state_machine.max_attempts,
-        retreat_distance=cfg.retract.distance,
+        base_backoff_time=cfg.base_backoff.time,
+        base_backoff_velocity=cfg.base_backoff.linear_velocity,
         retry_backoff_distance=cfg.retry_backoff.distance,
     )
     result = sm.run(grasp_base, pull_base)
