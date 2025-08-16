@@ -6,5 +6,8 @@ pull_down_distance: 0.12
 base_move:
   duration: 2.0
   linear_velocity: 0.2
+retry_backoff:
+  distance: 0.2
+  linear_velocity: 0.2
 state_machine:
   max_attempts: 3

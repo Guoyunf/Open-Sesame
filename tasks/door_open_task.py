@@ -65,6 +65,8 @@ def open_door(
         max_attempts=cfg.state_machine.max_attempts,
         base_move_duration=cfg.base_move.duration,
         base_move_velocity=cfg.base_move.linear_velocity,
+        retry_backoff_distance=cfg.retry_backoff.distance,
+        retry_backoff_velocity=cfg.retry_backoff.linear_velocity,
     )
     result = sm.run(grasp_base, pull_base)
 

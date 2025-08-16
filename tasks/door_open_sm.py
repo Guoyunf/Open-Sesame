@@ -27,12 +27,16 @@ class DoorOpenStateMachine:
         max_attempts: int = 3,
         base_move_duration: float = 2.0,
         base_move_velocity: float = 0.2,
+        retry_backoff_distance: float = 0.2,
+        retry_backoff_velocity: float = 0.2,
     ):
         self.arm = arm
         self.base = base
         self.max_attempts = max_attempts
         self.base_move_duration = base_move_duration
         self.base_move_velocity = base_move_velocity
+        self.retry_backoff_distance = retry_backoff_distance
+        self.retry_backoff_velocity = retry_backoff_velocity
         self.state = self.APPROACH
         self.joint3_history: List[float] = []
 
@@ -80,5 +84,14 @@ class DoorOpenStateMachine:
                     self.state = self.DONE
             if self.state == self.DONE:
                 return self.DONE
+            move_base_backward(
+                self.base,
+                duration=(
+                    self.retry_backoff_distance / self.retry_backoff_velocity
+                    if self.retry_backoff_velocity > 0
+                    else 0
+                ),
+                linear_velocity=self.retry_backoff_velocity,
+            )
             attempts += 1
         return self.ERROR

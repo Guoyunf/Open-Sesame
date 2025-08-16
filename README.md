@@ -17,7 +17,8 @@ looking back at previous non‑zero measurements. During the pull, a background
 thread continuously logs the joint effort to ``joint3_effort_attempt<i>.txt`` so
 that the entire trajectory can be inspected later. If an error is detected
 during the pull phase, the state machine automatically retries the entire
-sequence up to three times before giving up.
+sequence up to three times before giving up. On each failed attempt, the base
+first backs away by about 20 cm before re-approaching the handle.
 
 A high-level helper `open_door` combines this state machine with camera-based
 handle detection and coordinate transformation. The handle location can be
