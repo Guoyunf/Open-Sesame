@@ -22,7 +22,7 @@ def open_door(
     ----------
     cfg_path:
         Path to the YAML configuration describing grasp orientation, pull distance,
-        base motion and retry settings.
+        arm retreat and retry settings.
     use_model:
         If ``True`` the vision model path/name in ``model`` is used for detection,
         otherwise manual clicking is performed.
@@ -38,7 +38,7 @@ def open_door(
 
     cam = Camera.init_from_yaml(cfg_path="cfg/cfg_cam.yaml")
     arm = Arm.init_from_yaml(cfg_path="cfg/cfg_arm_left.yaml")
-    base = RosBase(linear_velocity=cfg.base_move.linear_velocity, angular_velocity=0.5)
+    base = RosBase(linear_velocity=0.2, angular_velocity=0.5)
 
     if use_model:
         x_cam, y_cam, z_cam = get_handle_coords_model(model, cam)
@@ -63,10 +63,8 @@ def open_door(
         arm,
         base,
         max_attempts=cfg.state_machine.max_attempts,
-        base_move_duration=cfg.base_move.duration,
-        base_move_velocity=cfg.base_move.linear_velocity,
+        retreat_distance=cfg.retract.distance,
         retry_backoff_distance=cfg.retry_backoff.distance,
-        retry_backoff_velocity=cfg.retry_backoff.linear_velocity,
     )
     result = sm.run(grasp_base, pull_base)
 
