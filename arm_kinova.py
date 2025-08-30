@@ -194,6 +194,14 @@ class Arm:
     def control_gripper(self, open_value):
         self.set_gripper(open_value)
 
+    def open_gripper(self):
+        """Open the gripper to its configured open position."""
+        self.set_gripper(self.g_open)
+
+    def close_gripper(self):
+        """Close the gripper to its configured closed position."""
+        self.set_gripper(self.g_close)
+
     def target2cam_xyzrpy_to_target2base_xyzrpy(self, xyzrpy_cam):
         """
         将 [x,y,z,rx,ry,rz] (弧度) 从相机坐标系变换到基坐标系。
