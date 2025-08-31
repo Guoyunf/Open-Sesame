@@ -23,7 +23,8 @@ def approach_handle(arm: Any, target_pose: Sequence[float]) -> None:
         return
 
     if hasattr(arm, "control_gripper"):
-        arm.control_gripper(open_value=0)
+        # Ensure gripper command completes before proceeding
+        arm.control_gripper(open_value=0, wait=True)
 
     if hasattr(arm, "move_p"):
         arm.move_p(list(target_pose))

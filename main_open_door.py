@@ -268,7 +268,8 @@ def main():
 
         # a. Open gripper and move to grasp position
         print("Step 1: Opening gripper...")
-        arm.control_gripper(open_value=0)  # Open wide
+        # Wait for the gripper to fully open before proceeding
+        arm.control_gripper(open_value=0, wait=True)  # Open wide
         time.sleep(1)
 
         print(f"Step 2: Moving to handle at {np.round(pos_grasp_base[:3], 4)}...")
@@ -277,7 +278,8 @@ def main():
 
         # b. Close gripper to grasp handle
         print("Step 3: Grasping handle...")
-        arm.control_gripper(open_value=6000)  # Close to grasp
+        # Wait for the close action to complete to avoid command loss
+        arm.control_gripper(open_value=6000, wait=True)  # Close to grasp
         time.sleep(1.5)  # Wait for grasp to be firm
 
         # Optional: Check if grasp was successful
@@ -302,7 +304,7 @@ def main():
         # --- 6. Cleanup and Shutdown ---
         print("\n--- Mission Finished. Returning to home position. ---")
         # Optional: Add a 'home_position' and move the arm back
-        arm.control_gripper(open_value=0)
+        arm.control_gripper(open_value=0, wait=True)
         arm.move_p(HOME_POSITION)
         # For now, just release the gripper
         time.sleep(1)

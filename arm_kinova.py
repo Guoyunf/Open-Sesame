@@ -184,23 +184,38 @@ class Arm:
         self._vel_pub.publish(msg)
 
     # 夹爪
-    def set_gripper(self,val):
+    def set_gripper(self, val, wait=True, timeout=5.0):
+        """Send a finger position goal to the gripper.
+
+        Args:
+            val (float): Target finger position.
+            wait (bool): If True, block until the action is reported finished.
+            timeout (float): Maximum time to wait for the action result (seconds).
+        """
         import kinova_msgs.msg as km
         goal = km.SetFingersPositionGoal()
         goal.fingers.finger1 = goal.fingers.finger2 = val
         goal.fingers.finger3 = 0.0
         self._grip_cli.send_goal(goal)
+        if wait:
+            self._grip_cli.wait_for_result(rospy.Duration(timeout))
 
-    def control_gripper(self, open_value):
-        self.set_gripper(open_value)
+    def control_gripper(self, open_value, wait=True, timeout=5.0):
+        """Convenience wrapper to control the gripper opening.
 
-    def open_gripper(self):
+        This function now waits for the action result by default to avoid
+        command loss when a new goal is sent before the previous one
+        completes.
+        """
+        self.set_gripper(open_value, wait=wait, timeout=timeout)
+
+    def open_gripper(self, wait=True, timeout=5.0):
         """Open the gripper to its configured open position."""
-        self.set_gripper(self.g_open)
+        self.set_gripper(self.g_open, wait=wait, timeout=timeout)
 
-    def close_gripper(self):
+    def close_gripper(self, wait=True, timeout=5.0):
         """Close the gripper to its configured closed position."""
-        self.set_gripper(self.g_close)
+        self.set_gripper(self.g_close, wait=wait, timeout=timeout)
 
     def target2cam_xyzrpy_to_target2base_xyzrpy(self, xyzrpy_cam):
         """
