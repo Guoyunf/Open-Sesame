@@ -67,17 +67,20 @@ def get_handle_coords_manual(cam: Camera) -> Tuple[float, float, float]:
     return coords["X"], coords["Y"], coords["Z"]
 
 
-def get_handle_coords_model(model: str, cam: Camera) -> Tuple[float, float, float]:
+DEFAULT_HANDLE_DET_HOST = os.environ.get("HANDLE_DETECTION_HOST", "http://127.0.0.1:18000")
+
+
+def get_handle_coords_model(cam: Camera, host: str | None = None) -> Tuple[float, float, float]:
     """Detect handle with a vision model and return coordinates in camera frame.
 
     Parameters
     ----------
-    model:
-        Base URL of the handle-detection service, e.g. ``"http://127.0.0.1:18000"``.
-        The service must expose a ``/predict_upload`` endpoint that accepts an RGB
-        image and returns JSON with ``x`` and ``y`` pixel coordinates.
     cam:
         Camera object used to capture an RGBD frame.
+    host:
+        Optional base URL of the handle-detection service. If ``None`` the value
+        from the ``HANDLE_DETECTION_HOST`` environment variable is used, falling
+        back to ``"http://127.0.0.1:18000"``.
     """
     print("\n--- Starting Model-Based Handle Detection ---")
 
@@ -86,12 +89,15 @@ def get_handle_coords_model(model: str, cam: Camera) -> Tuple[float, float, floa
         print("[ERROR] Failed to capture RGBD frame.")
         return None, None, None
 
+    if host is None:
+        host = DEFAULT_HANDLE_DET_HOST
+
     # Save RGB image to a temporary file and upload it to the inference service.
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = tmp.name
     try:
         cv2.imwrite(tmp_path, rgb_img)
-        url = f"{model.rstrip('/')}/predict_upload"
+        url = f"{host.rstrip('/')}/predict_upload"
         with open(tmp_path, "rb") as f:
             response = requests.post(url, files={"file": f}, timeout=120)
         response.raise_for_status()

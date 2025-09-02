@@ -1,7 +1,5 @@
 """High level task to detect a door handle and open the door."""
 
-from typing import Optional
-
 from camera import Camera
 from arm_kinova import Arm
 from dog_gs import RosBase
@@ -11,11 +9,7 @@ from .handle_detection import get_handle_coords_manual, get_handle_coords_model
 from .door_open_sm import DoorOpenStateMachine
 
 
-def open_door(
-    cfg_path: str = "cfg/cfg_door_open.yaml",
-    use_model: bool = False,
-    model: Optional[str] = None,
-) -> str:
+def open_door(cfg_path: str = "cfg/cfg_door_open.yaml", use_model: bool = False) -> str:
     """Run the full door opening procedure.
 
     Parameters
@@ -24,10 +18,8 @@ def open_door(
         Path to the YAML configuration describing grasp orientation, pull distance,
         base retreat and retry settings.
     use_model:
-        If ``True`` the vision model path/name in ``model`` is used for detection,
-        otherwise manual clicking is performed.
-    model:
-        Name or path of the detection model.
+        If ``True`` the vision model service is used for detection, otherwise
+        manual clicking is performed.
 
     Returns
     -------
@@ -41,7 +33,7 @@ def open_door(
     base = RosBase(linear_velocity=0.2, angular_velocity=0.5)
 
     if use_model:
-        x_cam, y_cam, z_cam = get_handle_coords_model(model, cam)
+        x_cam, y_cam, z_cam = get_handle_coords_model(cam)
     else:
         x_cam, y_cam, z_cam = get_handle_coords_manual(cam)
 
