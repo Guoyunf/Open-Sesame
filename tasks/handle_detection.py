@@ -3,6 +3,7 @@
 import os
 import time
 import tempfile
+from datetime import datetime
 from typing import Tuple
 
 import cv2
@@ -70,7 +71,9 @@ def get_handle_coords_manual(cam: Camera) -> Tuple[float, float, float]:
 DEFAULT_HANDLE_DET_HOST = os.environ.get("HANDLE_DETECTION_HOST", "http://127.0.0.1:18000")
 
 
-def get_handle_coords_model(cam: Camera, host: str | None = None) -> Tuple[float, float, float]:
+def get_handle_coords_model(
+    cam: Camera, host: str | None = None, save_dir: str = "handle_images"
+) -> Tuple[float, float, float]:
     """Detect handle with a vision model and return coordinates in camera frame.
 
     Parameters
@@ -81,6 +84,8 @@ def get_handle_coords_model(cam: Camera, host: str | None = None) -> Tuple[float
         Optional base URL of the handle-detection service. If ``None`` the value
         from the ``HANDLE_DETECTION_HOST`` environment variable is used, falling
         back to ``"http://127.0.0.1:18000"``.
+    save_dir:
+        Directory where the raw and annotated images will be stored.
     """
     print("\n--- Starting Model-Based Handle Detection ---")
 
@@ -88,6 +93,14 @@ def get_handle_coords_model(cam: Camera, host: str | None = None) -> Tuple[float
     if rgb_img is None or depth_img is None:
         print("[ERROR] Failed to capture RGBD frame.")
         return None, None, None
+
+    # ------------------------------------------------------------------
+    # Save raw RGB image locally
+    # ------------------------------------------------------------------
+    os.makedirs(save_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    raw_path = os.path.join(save_dir, f"{timestamp}_rgb.jpg")
+    cv2.imwrite(raw_path, rgb_img)
 
     if host is None:
         host = DEFAULT_HANDLE_DET_HOST
@@ -114,6 +127,14 @@ def get_handle_coords_model(cam: Camera, host: str | None = None) -> Tuple[float
         print("[ERROR] Model failed to detect the handle.")
         return None, None, None
 
+    # ------------------------------------------------------------------
+    # Draw prediction and save annotated image
+    # ------------------------------------------------------------------
+    vis_img = rgb_img.copy()
+    cv2.circle(vis_img, (int(x), int(y)), 8, (0, 0, 255), 2)
+    vis_path = os.path.join(save_dir, f"{timestamp}_pred.jpg")
+    cv2.imwrite(vis_path, vis_img)
+
     d_raw = cam.get_depth_point(x, y, depth_img)
     if d_raw == 0 or d_raw is None:
         d_raw = cam.get_depth_roi(x, y, depth_img)
@@ -125,6 +146,7 @@ def get_handle_coords_model(cam: Camera, host: str | None = None) -> Tuple[float
     print(
         f"Model detected handle at pixel ({x},{y}) -> 3D Coords (X,Y,Z): ({X:.4f}, {Y:.4f}, {Z:.4f}) m"
     )
+    print(f"Saved raw image to {raw_path} and prediction to {vis_path}")
     return X, Y, Z
 
 __all__ = ["get_handle_coords_manual", "get_handle_coords_model"]
