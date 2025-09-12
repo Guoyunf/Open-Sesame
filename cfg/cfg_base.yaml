@@ -2,3 +2,4 @@ host_ip: '192.168.10.10'
 host_port: 31001
 linear_velocity: 0.3 # 0.2
 angular_velocity: 0.5
+id: 243222073031
