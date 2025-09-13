@@ -28,7 +28,6 @@ class DoorOpenStateMachine:
         max_attempts: int = 3,
         base_backoff_time: float = 2.0,
         base_backoff_velocity: float = 0.2,
-        retry_backoff_distance: float = 0.2,
         approach_force_threshold: float = 10.0,
     ):
         self.arm = arm
@@ -36,7 +35,6 @@ class DoorOpenStateMachine:
         self.max_attempts = max_attempts
         self.base_backoff_time = base_backoff_time
         self.base_backoff_velocity = base_backoff_velocity
-        self.retry_backoff_distance = retry_backoff_distance
         self.approach_force_threshold = approach_force_threshold
         self.state = self.APPROACH
         self.joint3_history: List[float] = []
@@ -66,6 +64,8 @@ class DoorOpenStateMachine:
 
         while attempts < self.max_attempts:
             if self.state == self.APPROACH:
+                # Reset the arm before each detection attempt
+                retreat_gripper(self.arm)
                 poses = pose_fn()
                 if poses is None:
                     return self.ERROR
@@ -88,7 +88,7 @@ class DoorOpenStateMachine:
                     self.arm, self.joint3_history, pull_pose, log_path
                 )
                 if error:
-                    retreat_gripper(self.arm, self.retry_backoff_distance)
+                    retreat_gripper(self.arm)
                     attempts += 1
                     self.joint3_history.clear()
                     self.state = self.APPROACH
