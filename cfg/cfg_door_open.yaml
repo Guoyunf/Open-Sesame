@@ -3,6 +3,9 @@ grasp_orientation:
   pitch: -0.184
   yaw: -1.422
 pull_down_distance: 0.12
+pull_toward_hinge_distance: 0.05
+push_forward_distance: 0.1
+approach_force_threshold: 10.0
 base_backoff:
   time: 2.0
   linear_velocity: 0.2

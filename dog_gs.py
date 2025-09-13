@@ -95,10 +95,11 @@ class RosBase(object):
         with self.odom_lock:
             self.current_pose = msg.pose.pose
 
-    def _publish_cmd_vel(self, linear_x, angular_z):
+    def _publish_cmd_vel(self, linear_x=0.0, angular_z=0.0, linear_y=0.0):
         """Helper function to publish a Twist message."""
         twist_msg = Twist()
         twist_msg.linear.x = linear_x
+        twist_msg.linear.y = linear_y
         twist_msg.angular.z = angular_z
         self.vel_publisher.publish(twist_msg)
 
@@ -122,6 +123,16 @@ class RosBase(object):
             vel = self.angular_velocity
         self._publish_cmd_vel(0, -abs(vel))
 
+    def strafe_left(self, vel=None):
+        if vel is None:
+            vel = self.linear_velocity
+        self._publish_cmd_vel(0, 0, abs(vel))
+
+    def strafe_right(self, vel=None):
+        if vel is None:
+            vel = self.linear_velocity
+        self._publish_cmd_vel(0, 0, -abs(vel))
+
     def move_stop(self, if_p=False):
         self._publish_cmd_vel(0, 0)
         if if_p:
@@ -144,6 +155,10 @@ class RosBase(object):
             self.move_left(vel=angular_vel)
         elif char in ("d", "M"):  # 'M' is right arrow
             self.move_right(vel=angular_vel)
+        elif char == "j":  # strafe left
+            self.strafe_left(vel=linear_vel)
+        elif char == "l":  # strafe right
+            self.strafe_right(vel=linear_vel)
         elif char == "x":
             self.move_stop()
         else:
@@ -178,6 +193,22 @@ class RosBase(object):
                 self.move_right(angular_velocity)
             else:  # Negative T for left rotation
                 self.move_left(angular_velocity)
+            if if_p:
+                rospy.loginfo(f"[Time]: {rospy.get_time() - start_time:.2f}")
+            rate.sleep()
+        self.move_stop(if_p=True)
+
+    def strafe_T(self, T, linear_velocity=None, if_p=False):
+        """Strafes left (T>0) or right (T<0) for duration ``T``."""
+        if linear_velocity is None:
+            linear_velocity = self.linear_velocity
+
+        rate = rospy.Rate(50)
+        start_time = rospy.get_time()
+
+        while not rospy.is_shutdown() and (rospy.get_time() - start_time) < abs(T):
+            vel = linear_velocity if T > 0 else -linear_velocity
+            self.strafe_left(vel) if T > 0 else self.strafe_right(abs(vel))
             if if_p:
                 rospy.loginfo(f"[Time]: {rospy.get_time() - start_time:.2f}")
             rate.sleep()
