@@ -9,21 +9,33 @@ save_dir = "captured_images"
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
+# 相机序列号
+CAM1_SN = "243122075526"  # 第三视角
+CAM2_SN = "243222073031"  # 第一视角
+
 # 初始化相机-第三视角
 pipe1 = rs.pipeline()
 cfg1 = rs.config()
-cfg1.enable_device("243122075526")  # 确保设备ID正确
+cfg1.enable_device(CAM1_SN)
 cfg1.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 cfg1.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-pipe1.start(cfg1)
+try:
+    pipe1.start(cfg1)
+except Exception as e:
+    print(f"Failed to connect to camera 1 (ID: {CAM1_SN}): {e}")
+    raise
 
 # 初始化相机-第一视角
 pipe2 = rs.pipeline()
 cfg2 = rs.config()
-cfg2.enable_device("243222073031")  # 确保设备ID正确
+cfg2.enable_device(CAM2_SN)
 cfg2.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 cfg2.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-pipe2.start(cfg2)
+try:
+    pipe2.start(cfg2)
+except Exception as e:
+    print(f"Failed to connect to camera 2 (ID: {CAM2_SN}): {e}")
+    raise
 
 # 等待相机稳定
 print("Waiting for cameras to stabilize...")
