@@ -1,25 +1,34 @@
-"""Primitives for retreating either the gripper or the base."""
+"""Primitives for retreating the robot."""
 
-from typing import Any
+from typing import Any, Sequence
 
 
-def retreat_gripper(arm: Any, distance: float = 0.2) -> None:
-    """Move the gripper ``distance`` meters in the +Y direction.
+# Default "home" pose for resetting the arm.
+HOME_POSITION = [
+    0.21248655021190643,
+    -0.2564840614795685,
+    0.5075023174285889,
+    1.512,
+    -0.184,
+    -1.422,
+]
+
+
+def retreat_gripper(arm: Any, home_position: Sequence[float] = HOME_POSITION) -> None:
+    """Return the arm to the ``home_position``.
 
     Parameters
     ----------
     arm:
-        Arm-like object providing ``pose`` and ``move_p`` methods.
-    distance:
-        Positive offset along the Y axis in meters.
+        Arm-like object providing a ``move_p`` method.
+    home_position:
+        Target pose representing the arm's "home" configuration.
     """
     if arm is None:
         return
 
-    if hasattr(arm, "pose") and hasattr(arm, "move_p"):
-        current = list(arm.pose())
-        current[1] += abs(distance)
-        arm.move_p(current)
+    if hasattr(arm, "move_p"):
+        arm.move_p(list(home_position))
 
 
 def retreat_base(base: Any, time_s: float = 2.0, linear_velocity: float = 0.2) -> None:

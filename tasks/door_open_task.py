@@ -96,7 +96,6 @@ def open_door(
         max_attempts=cfg.state_machine.max_attempts,
         base_backoff_time=cfg.base_backoff.time,
         base_backoff_velocity=cfg.base_backoff.linear_velocity,
-        retry_backoff_distance=cfg.retry_backoff.distance,
         approach_force_threshold=getattr(cfg, "approach_force_threshold", 10.0),
     )
     result = sm.run(detect_and_plan)
