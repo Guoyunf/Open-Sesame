@@ -8,6 +8,7 @@ from primitives import (
     retreat_gripper,
     retreat_base,
     pull_handle_and_check,
+    push_door,
 )
 
 
@@ -17,6 +18,7 @@ class DoorOpenStateMachine:
     APPROACH = "approach"
     GRASP = "grasp"
     PULL = "pull"
+    PUSH = "push"
     MOVE_BASE = "move_base"
     DONE = "done"
     ERROR = "error"
@@ -41,15 +43,15 @@ class DoorOpenStateMachine:
 
     def run(
         self,
-        pose_fn: Callable[[], Optional[Tuple[Sequence[float], Sequence[float]]]],
+        pose_fn: Callable[[], Optional[Tuple[Sequence[float], Sequence[float], Sequence[float]]]],
     ) -> str:
         """Run the state machine until completion or error.
 
         Parameters
         ----------
         pose_fn:
-            Callable that returns ``(grasp_pose, pull_pose)`` each time it is
-            invoked. If detection fails it should return ``None``.
+            Callable that returns ``(grasp_pose, pull_pose, push_pose)`` each
+            time it is invoked. If detection fails it should return ``None``.
 
         Returns
         -------
@@ -61,6 +63,7 @@ class DoorOpenStateMachine:
         self.joint3_history.clear()
         grasp_pose: Optional[Sequence[float]] = None
         pull_pose: Optional[Sequence[float]] = None
+        push_pose: Optional[Sequence[float]] = None
 
         while attempts < self.max_attempts:
             if self.state == self.APPROACH:
@@ -69,7 +72,7 @@ class DoorOpenStateMachine:
                 poses = pose_fn()
                 if poses is None:
                     return self.ERROR
-                grasp_pose, pull_pose = poses
+                grasp_pose, pull_pose, push_pose = poses
                 force_error = approach_handle_and_check_force(
                     self.arm, grasp_pose, self.approach_force_threshold
                 )
@@ -93,7 +96,12 @@ class DoorOpenStateMachine:
                     self.joint3_history.clear()
                     self.state = self.APPROACH
                 else:
-                    self.state = self.MOVE_BASE
+                    self.state = self.PUSH
+
+            elif self.state == self.PUSH:
+                if push_pose is not None:
+                    push_door(self.arm, push_pose)
+                self.state = self.MOVE_BASE
 
             elif self.state == self.MOVE_BASE:
                 retreat_base(
