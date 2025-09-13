@@ -9,6 +9,7 @@ from primitives import (
     retreat_base,
     pull_handle_and_check,
     push_door,
+    extend_forward_left,
 )
 
 
@@ -101,6 +102,10 @@ class DoorOpenStateMachine:
             elif self.state == self.PUSH:
                 if push_pose is not None:
                     push_door(self.arm, push_pose)
+                    if hasattr(self.arm, "open_gripper"):
+                        self.arm.open_gripper()
+                    extend_forward_left(self.arm, push_pose)
+                    retreat_gripper(self.arm)
                 self.state = self.MOVE_BASE
 
             elif self.state == self.MOVE_BASE:
