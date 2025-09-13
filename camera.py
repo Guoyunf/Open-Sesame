@@ -35,6 +35,7 @@ class Camera(object):
         extrinsic=None,
         depth_scale=0.001,
         fps=30,
+        serial_number=None,
     ):
         self.width = width
         self.height = height
@@ -49,6 +50,7 @@ class Camera(object):
         )
         self.extrinsic = extrinsic
         self.depth_scale = depth_scale
+        self.serial_number = serial_number
         self.pc = PointCloud(
             self.pinhole_intrinsic, self.extrinsic, 1 / self.depth_scale
         )
@@ -64,6 +66,7 @@ class Camera(object):
             cfg.extrinsic,
             cfg.depth_scale,
             cfg.fps,
+            getattr(cfg, "id", None),
         )
 
     def __str__(self):
@@ -73,7 +76,8 @@ class Camera(object):
         print("==========\nCamera Connecting...")
         self.pipeline = rs.pipeline()
         self.config = rs.config()
-        # self.config.enable_device('238122071696')
+        if self.serial_number is not None:
+            self.config.enable_device(str(self.serial_number))
         self.config.enable_stream(
             rs.stream.depth, self.width, self.height, rs.format.z16, fps
         )
