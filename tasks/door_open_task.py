@@ -19,6 +19,14 @@ def _compute_pull_pose(grasp_pose, down_dist, toward_dist):
     return [new_x, new_y, new_z, roll, pitch, yaw]
 
 
+def _compute_push_pose(pull_pose, forward_dist):
+    """Compute push pose to further open the door."""
+    x, y, z, roll, pitch, yaw = pull_pose
+    new_x = x + forward_dist * math.cos(yaw)
+    new_y = y + forward_dist * math.sin(yaw)
+    return [new_x, new_y, z, roll, pitch, yaw]
+
+
 def open_door(
     cfg_path: str = "cfg/cfg_door_open.yaml",
     use_model: bool = False,
@@ -32,8 +40,8 @@ def open_door(
     Parameters
     ----------
     cfg_path:
-        Path to the YAML configuration describing grasp orientation, pull distance,
-        base retreat and retry settings.
+        Path to the YAML configuration describing grasp orientation, pull and push
+        distances, base retreat and retry settings.
         ``approach_force_threshold`` sets the maximum allowable force while
         moving the gripper to the handle.
     use_model:
@@ -88,7 +96,11 @@ def open_door(
             cfg.pull_down_distance,
             getattr(cfg, "pull_toward_hinge_distance", 0.05),
         )
-        return grasp_base, pull_base
+        push_base = _compute_push_pose(
+            pull_base,
+            getattr(cfg, "push_forward_distance", 0.1),
+        )
+        return grasp_base, pull_base, push_base
 
     sm = DoorOpenStateMachine(
         arm,
