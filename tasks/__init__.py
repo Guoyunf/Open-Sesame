@@ -1,12 +1,37 @@
-"""Tasks for the Open-Sesame project."""
+"""Public entry points for task-level helpers."""
 
-from .door_open_sm import DoorOpenStateMachine
-from .door_open_task import open_door
-from .handle_detection import get_handle_coords_manual, get_handle_coords_model
+from __future__ import annotations
+
+import importlib
+from typing import Any
 
 __all__ = [
     "DoorOpenStateMachine",
     "open_door",
     "get_handle_coords_manual",
     "get_handle_coords_model",
+    "get_button_coords_manual",
+    "get_button_coords_model",
+    "press_button",
 ]
+
+_ATTR_TO_MODULE = {
+    "DoorOpenStateMachine": "tasks.door_open_sm",
+    "open_door": "tasks.door_open_task",
+    "get_handle_coords_manual": "tasks.handle_detection",
+    "get_handle_coords_model": "tasks.handle_detection",
+    "get_button_coords_manual": "tasks.button_detection",
+    "get_button_coords_model": "tasks.button_detection",
+    "press_button": "tasks.button_press_task",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _ATTR_TO_MODULE:
+        raise AttributeError(f"module 'tasks' has no attribute '{name}'")
+    module = importlib.import_module(_ATTR_TO_MODULE[name])
+    return getattr(module, name)
+
+
+def __dir__() -> list[str]:
+    return sorted(__all__)

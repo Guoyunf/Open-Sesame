@@ -29,3 +29,13 @@ obtained either by manually clicking in the camera image or by plugging in a
 vision model. Detected coordinates are converted from the camera frame to the
 robot's base frame via `Arm.target2cam_xyzrpy_to_target2base_xyzrpy`, and all
 poses are configured using values from `cfg/cfg_door_open.yaml`.
+
+## Button pressing task
+
+The `press_button` helper provides an analogous workflow for flat buttons. The
+button centre can be specified manually or obtained from an external model via
+`get_button_coords_manual` / `get_button_coords_model`. After transforming the
+camera-frame coordinates to the arm's base frame, the arm approaches the target,
+presses forward by a configurable distance along the negative Y-axis, and then
+retreats. All offsets, dwell times, and gripper orientation parameters are
+stored in `cfg/cfg_button_press.yaml` so they can be tuned per environment.
