@@ -13,6 +13,8 @@ __all__ = [
     "get_button_coords_manual",
     "get_button_coords_model",
     "press_button",
+    "auto_playback",
+    "button_press_task",
 ]
 
 _ATTR_TO_MODULE = {
@@ -23,6 +25,8 @@ _ATTR_TO_MODULE = {
     "get_button_coords_manual": "tasks.button_detection",
     "get_button_coords_model": "tasks.button_detection",
     "press_button": "tasks.button_press_task",
+    "auto_playback": "tasks.auto_playback",
+    "button_press_task": "tasks.button_press_task",
 }
 
 

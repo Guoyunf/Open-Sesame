@@ -23,6 +23,8 @@ def _generate_press_sequence(
     """Create a sequence of labelled poses to approach, press and retreat."""
 
     base_pose = list(target_pose)
+    base_pose[2] -= 0.03  # Slightly above the button
+    base_pose[0] -= 0.02  # Slightly closer to the button
     sequence: List[Tuple[str, List[float]]] = []
 
     if approach_offset:
@@ -112,13 +114,14 @@ def press_button(
         )
         press_duration = _as_float(getattr(cfg, "press_duration", 0.5))
 
-        if hasattr(arm, "open_gripper"):
-            arm.open_gripper()
+        if hasattr(arm, "close_gripper"):
+            arm.close_gripper()
 
         sequence = _generate_press_sequence(
             target_pose, approach_offset, press_distance, retreat_offset
         )
 
+        time.sleep(2.0)  # Wait a moment before starting
         for label, pose in sequence:
             print(f"Executing {label} pose: {pose}")
             arm.move_p(pose)
