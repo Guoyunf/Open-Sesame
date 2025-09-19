@@ -2,7 +2,7 @@ grasp_orientation:
   roll: 1.5708
   pitch: 0.0
   yaw: -1.5708
-approach_offset: 0.08
-press_distance: 0.03
+approach_offset: 0.2
+press_distance: 0.015
 press_duration: 0.5
-retreat_offset: 0.08
+retreat_offset: 0.4

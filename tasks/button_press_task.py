@@ -23,8 +23,9 @@ def _generate_press_sequence(
     """Create a sequence of labelled poses to approach, press and retreat."""
 
     base_pose = list(target_pose)
-    base_pose[2] -= 0.03  # Slightly above the button
-    base_pose[0] -= 0.02  # Slightly closer to the button
+    base_pose[2] -= 0.035  # Slightly above the button
+    base_pose[1] += 0.02  # Slightly to the side of the button
+    base_pose[0] -= 0.025  # Slightly closer to the button
     sequence: List[Tuple[str, List[float]]] = []
 
     if approach_offset:
