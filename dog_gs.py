@@ -17,7 +17,7 @@ import math
 import os
 import threading
 import time
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import rospy
 import tf
@@ -48,9 +48,18 @@ class RosBase(object):
         cmd_vel_topic="/nav/cmd_vel",
         odom_topic="/nav/leg_odom",
         move_base_action="/move_base",
+        translation_scale: float = 1.0,
+        lateral_scale: float = 1.0,
+        rotation_scale: float = 1.0,
     ):
-        """
-        Initializes the ROS node, publishers, subscribers, and action client.
+        """Initializes the ROS node, publishers, subscribers, and action client.
+
+        Parameters
+        ----------
+        translation_scale, lateral_scale, rotation_scale:
+            Optional multiplicative factors applied to raw odometry readings.
+            They can be calibrated to correct systematic scale errors between
+            commanded and measured motion.
         """
         # If the ROS node has not been initialized yet, initialize one.
         # This allows multiple classes to be instantiated safely in the same process.
@@ -63,6 +72,10 @@ class RosBase(object):
         self.linear_velocity = linear_velocity
         self.angular_velocity = angular_velocity
         self.control_rate_hz = 50.0
+        self.translation_scale = float(translation_scale)
+        self.lateral_scale = float(lateral_scale)
+        self.rotation_scale = float(rotation_scale)
+        self._last_motion_report: Optional[Dict[str, Any]] = None
         self.markers = {}  # To store named locations
 
         # State variables
@@ -155,6 +168,118 @@ class RosBase(object):
         if if_p:
             rospy.loginfo("[Base Stop]")
 
+    def _store_motion_report(self, motion_type: str, report: Dict[str, Any]) -> None:
+        """Cache telemetry about the last closed-loop motion."""
+
+        cached = dict(report)
+        cached["motion_type"] = motion_type
+        cached["timestamp"] = rospy.get_time()
+        self._last_motion_report = cached
+
+    def get_last_motion_report(self) -> Optional[Dict[str, Any]]:
+        """Return a copy of the most recent motion telemetry."""
+
+        if self._last_motion_report is None:
+            return None
+        return dict(self._last_motion_report)
+
+    def update_odometry_scales(
+        self,
+        translation: Optional[float] = None,
+        lateral: Optional[float] = None,
+        rotation: Optional[float] = None,
+    ) -> None:
+        """Manually set scaling factors applied to odometry feedback."""
+
+        if translation is not None:
+            if translation <= 0:
+                raise ValueError("translation scale must be positive")
+            self.translation_scale = float(translation)
+            rospy.loginfo("Updated forward odometry scale to %.4f", self.translation_scale)
+
+        if lateral is not None:
+            if lateral <= 0:
+                raise ValueError("lateral scale must be positive")
+            self.lateral_scale = float(lateral)
+            rospy.loginfo("Updated lateral odometry scale to %.4f", self.lateral_scale)
+
+        if rotation is not None:
+            if rotation <= 0:
+                raise ValueError("rotation scale must be positive")
+            self.rotation_scale = float(rotation)
+            rospy.loginfo("Updated rotational odometry scale to %.4f", self.rotation_scale)
+
+    def _calibrate_scale(
+        self,
+        actual: float,
+        odom: float,
+        motion_type: str,
+    ) -> float:
+        """Helper computing |actual|/|odom| ensuring valid inputs."""
+
+        odom_mag = abs(float(odom))
+        if odom_mag <= 1e-6:
+            raise ValueError("odometry distance must be non-zero for calibration")
+        scale = abs(float(actual)) / odom_mag
+        if scale <= 0:
+            raise ValueError("calculated scale must be positive")
+        rospy.loginfo(
+            "Calibrated %s odometry scale: actual=%.4f, odom=%.4f, scale=%.4f",
+            motion_type,
+            actual,
+            odom,
+            scale,
+        )
+        return scale
+
+    def calibrate_translation_scale(
+        self, actual_distance: float, odom_distance: Optional[float] = None
+    ) -> float:
+        """Update the forward odometry scale using a ground-truth measurement."""
+
+        if odom_distance is None:
+            report = self.get_last_motion_report()
+            if not report or report.get("motion_type") != "linear":
+                raise ValueError(
+                    "No previous linear motion report available; pass odom_distance explicitly."
+                )
+            odom_distance = report["odom_traveled"]
+        scale = self._calibrate_scale(actual_distance, odom_distance, "linear")
+        self.translation_scale = scale
+        return scale
+
+    def calibrate_lateral_scale(
+        self, actual_distance: float, odom_distance: Optional[float] = None
+    ) -> float:
+        """Update the lateral odometry scale using a ground-truth measurement."""
+
+        if odom_distance is None:
+            report = self.get_last_motion_report()
+            if not report or report.get("motion_type") != "lateral":
+                raise ValueError(
+                    "No previous lateral motion report available; pass odom_distance explicitly."
+                )
+            odom_distance = report["odom_traveled"]
+        scale = self._calibrate_scale(actual_distance, odom_distance, "lateral")
+        self.lateral_scale = scale
+        return scale
+
+    def calibrate_rotation_scale(
+        self, actual_angle: float, odom_angle: Optional[float] = None
+    ) -> float:
+        """Update the angular odometry scale using a ground-truth measurement."""
+
+        if odom_angle is None:
+            report = self.get_last_motion_report()
+            if not report or report.get("motion_type") != "angular":
+                raise ValueError(
+                    "No previous angular motion report available; pass odom_angle explicitly."
+                )
+            odom_angle = report["odom_traveled"]
+        scale = self._calibrate_scale(actual_angle, odom_angle, "angular")
+        self.rotation_scale = scale
+        return scale
+
     @staticmethod
     def _normalize_angle(angle: float) -> float:
         """Wrap ``angle`` to the ``[-pi, pi]`` interval."""
@@ -202,6 +327,26 @@ class RosBase(object):
                 "location must contain exactly three elements (x, y, theta)"
             ) from None
         return float(x), float(y), float(theta)
+
+    @staticmethod
+    def _max_velocity_from_error(
+        error: float,
+        tolerance: float,
+        max_velocity: float,
+        slow_distance: float,
+    ) -> float:
+        """Return a velocity limit that ramps down near the goal."""
+
+        if max_velocity <= 0:
+            raise ValueError("max_velocity must be positive")
+        remaining = abs(error)
+        if remaining <= tolerance:
+            return 0.0
+        ramp = max(tolerance * 1.01, slow_distance)
+        if remaining >= ramp or ramp <= tolerance:
+            return max_velocity
+        ratio = (remaining - tolerance) / (ramp - tolerance)
+        return max_velocity * max(0.0, min(1.0, ratio))
 
     def move_char(self, char, linear_velocity=None, angular_velocity=None):
         linear_vel = (
@@ -284,11 +429,13 @@ class RosBase(object):
         distance: float,
         max_linear_velocity: Optional[float] = None,
         tolerance: float = 0.01,
+        slow_distance: float = 0.2,
         kp: float = 1.2,
         ki: float = 0.0,
         kd: float = 0.05,
         integral_limit: float = 0.5,
         max_time: Optional[float] = None,
+        max_linear_acceleration: Optional[float] = None,
         log_progress: bool = False,
     ) -> dict:
         """Drive forward/backward for ``distance`` metres using odometry feedback.
@@ -297,9 +444,23 @@ class RosBase(object):
         backward motion.  The motion is controlled by a simple PID controller
         running at ``self.control_rate_hz``.
 
+        Notes
+        -----
+        The raw odometry displacement is multiplied by
+        :attr:`translation_scale` before being compared to ``distance``.  Tune
+        this scale to compensate for systematic odometry bias measured during
+        hardware experiments.  When the odometry already matches real-world
+        measurements, leave the scale at ``1.0`` – the controller will instead
+        modulate the admissible velocity once the remaining error falls below
+        ``slow_distance`` so the robot decelerates smoothly near the goal.
+
+        ``max_linear_acceleration`` can be specified to cap how quickly the
+        commanded velocity is allowed to change between control cycles, which
+        can be useful on robots with limited traction.
+
         Returns a dictionary containing telemetry of the manoeuvre.  The keys
         are ``reached`` (``bool``), ``traveled`` (``float``), ``error``
-        (``float``) and ``duration`` (``float``).
+        (``float``), ``duration`` (``float``) and ``peak_velocity`` (``float``).
         """
 
         if max_linear_velocity is None:
@@ -307,14 +468,24 @@ class RosBase(object):
         max_linear_velocity = abs(max_linear_velocity)
         if tolerance <= 0:
             raise ValueError("tolerance must be positive")
+        if slow_distance <= 0:
+            raise ValueError("slow_distance must be positive")
+        if (
+            max_linear_acceleration is not None
+            and max_linear_acceleration <= 0
+        ):
+            raise ValueError("max_linear_acceleration must be positive when provided")
 
         start_pose = self.get_location()
         start_time = rospy.get_time()
         last_time = start_time
         integral = 0.0
         previous_error = distance
+        traveled_raw = 0.0
         traveled = 0.0
         reached = False
+        previous_command = 0.0
+        peak_command = 0.0
         rate = rospy.Rate(self.control_rate_hz)
 
         if max_time is None:
@@ -323,16 +494,19 @@ class RosBase(object):
             max_time = max(1.0, 3.0 * nominal)
 
         rospy.loginfo(
-            "[RosBase] Closed-loop linear motion target=%.3f m (max vel %.2f m/s)",
+            "[RosBase] Closed-loop linear target=%.3f m (max vel %.2f m/s, scale %.3f, slow zone %.2f m)",
             distance,
             max_linear_velocity,
+            self.translation_scale,
+            slow_distance,
         )
 
         while not rospy.is_shutdown():
             current_time = rospy.get_time()
             dt = max(1.0 / self.control_rate_hz, current_time - last_time)
             current_pose = self.get_location()
-            traveled, _ = self._project_displacement(start_pose, current_pose)
+            traveled_raw, _ = self._project_displacement(start_pose, current_pose)
+            traveled = traveled_raw * self.translation_scale
             error = distance - traveled
 
             if abs(error) <= tolerance:
@@ -343,13 +517,31 @@ class RosBase(object):
             integral = max(-integral_limit, min(integral, integral_limit))
             derivative = (error - previous_error) / dt
             control = kp * error + ki * integral + kd * derivative
-            control = max(-max_linear_velocity, min(control, max_linear_velocity))
+
+            allowed_velocity = self._max_velocity_from_error(
+                error, tolerance, max_linear_velocity, slow_distance
+            )
+            control = max(-allowed_velocity, min(control, allowed_velocity))
+
+            if max_linear_acceleration is not None:
+                max_delta = max_linear_acceleration * dt
+                if control > previous_command + max_delta:
+                    control = previous_command + max_delta
+                elif control < previous_command - max_delta:
+                    control = previous_command - max_delta
 
             self._publish_cmd_vel(linear_x=control, angular_z=0.0)
 
+            peak_command = max(peak_command, abs(control))
+            previous_command = control
+
             if log_progress:
                 rospy.loginfo(
-                    "[RosBase] distance remaining: %.3f m, cmd %.3f m/s", error, control
+                    "[RosBase] distance remaining: %.3f m (odom %.3f m, scaled %.3f m), cmd %.3f m/s",
+                    error,
+                    traveled_raw,
+                    traveled,
+                    control,
                 )
 
             previous_error = error
@@ -364,46 +556,84 @@ class RosBase(object):
         self.move_stop()
 
         duration = rospy.get_time() - start_time
-        final_error = distance - traveled
+        current_pose = self.get_location()
+        traveled_raw, _ = self._project_displacement(start_pose, current_pose)
+        final_traveled = traveled_raw * self.translation_scale
+        final_error = distance - final_traveled
         rospy.loginfo(
-            "[RosBase] Closed-loop linear motion finished (reached=%s, error=%.4f m)",
+            "[RosBase] Closed-loop linear motion finished (reached=%s, error=%.4f m, odom=%.4f m, scaled=%.4f m)",
             reached,
             final_error,
+            traveled_raw,
+            final_traveled,
         )
-        return {
+        result = {
             "reached": reached,
-            "traveled": traveled,
+            "traveled": final_traveled,
+            "odom_traveled": traveled_raw,
             "error": final_error,
             "duration": duration,
+            "scale": self.translation_scale,
+            "peak_velocity": peak_command,
         }
+        self._store_motion_report("linear", result)
+        return result
 
     def strafe_distance(
         self,
         distance: float,
         max_linear_velocity: Optional[float] = None,
         tolerance: float = 0.01,
+        slow_distance: float = 0.2,
         kp: float = 1.2,
         ki: float = 0.0,
         kd: float = 0.05,
         integral_limit: float = 0.5,
         max_time: Optional[float] = None,
+        max_linear_acceleration: Optional[float] = None,
         log_progress: bool = False,
     ) -> dict:
-        """Strafe left/right for ``distance`` metres using odometry feedback."""
+        """Strafe left/right for ``distance`` metres using odometry feedback.
+
+        Notes
+        -----
+        The raw lateral odometry displacement is multiplied by
+        :attr:`lateral_scale` before being compared to ``distance``.  Leave the
+        scale at ``1.0`` when the odometry already mirrors physical motion –
+        the controller automatically reduces the allowable strafe velocity as
+        the error falls below ``slow_distance`` to avoid overshooting.
+
+        ``max_linear_acceleration`` limits how quickly the lateral velocity
+        command can change between control cycles.
+
+        The returned telemetry mirrors :meth:`move_distance` and includes the
+        ``peak_velocity`` field so experiments can confirm the robot slowed
+        down as expected near the goal.
+        """
 
         if max_linear_velocity is None:
             max_linear_velocity = abs(self.linear_velocity)
         max_linear_velocity = abs(max_linear_velocity)
         if tolerance <= 0:
             raise ValueError("tolerance must be positive")
+        if slow_distance <= 0:
+            raise ValueError("slow_distance must be positive")
+        if (
+            max_linear_acceleration is not None
+            and max_linear_acceleration <= 0
+        ):
+            raise ValueError("max_linear_acceleration must be positive when provided")
 
         start_pose = self.get_location()
         start_time = rospy.get_time()
         last_time = start_time
         integral = 0.0
         previous_error = distance
+        lateral_raw = 0.0
         lateral = 0.0
         reached = False
+        previous_command = 0.0
+        peak_command = 0.0
         rate = rospy.Rate(self.control_rate_hz)
 
         if max_time is None:
@@ -411,16 +641,19 @@ class RosBase(object):
             max_time = max(1.0, 3.0 * nominal)
 
         rospy.loginfo(
-            "[RosBase] Closed-loop strafe target=%.3f m (max vel %.2f m/s)",
+            "[RosBase] Closed-loop strafe target=%.3f m (max vel %.2f m/s, scale %.3f, slow zone %.2f m)",
             distance,
             max_linear_velocity,
+            self.lateral_scale,
+            slow_distance,
         )
 
         while not rospy.is_shutdown():
             current_time = rospy.get_time()
             dt = max(1.0 / self.control_rate_hz, current_time - last_time)
             current_pose = self.get_location()
-            _, lateral = self._project_displacement(start_pose, current_pose)
+            _, lateral_raw = self._project_displacement(start_pose, current_pose)
+            lateral = lateral_raw * self.lateral_scale
             error = distance - lateral
 
             if abs(error) <= tolerance:
@@ -431,14 +664,30 @@ class RosBase(object):
             integral = max(-integral_limit, min(integral, integral_limit))
             derivative = (error - previous_error) / dt
             control = kp * error + ki * integral + kd * derivative
-            control = max(-max_linear_velocity, min(control, max_linear_velocity))
+
+            allowed_velocity = self._max_velocity_from_error(
+                error, tolerance, max_linear_velocity, slow_distance
+            )
+            control = max(-allowed_velocity, min(control, allowed_velocity))
+
+            if max_linear_acceleration is not None:
+                max_delta = max_linear_acceleration * dt
+                if control > previous_command + max_delta:
+                    control = previous_command + max_delta
+                elif control < previous_command - max_delta:
+                    control = previous_command - max_delta
 
             self._publish_cmd_vel(linear_x=0.0, angular_z=0.0, linear_y=control)
 
+            peak_command = max(peak_command, abs(control))
+            previous_command = control
+
             if log_progress:
                 rospy.loginfo(
-                    "[RosBase] lateral distance remaining: %.3f m, cmd %.3f m/s",
+                    "[RosBase] lateral remaining: %.3f m (odom %.3f m, scaled %.3f m), cmd %.3f m/s",
                     error,
+                    lateral_raw,
+                    lateral,
                     control,
                 )
 
@@ -454,47 +703,85 @@ class RosBase(object):
         self.move_stop()
 
         duration = rospy.get_time() - start_time
-        final_error = distance - lateral
+        current_pose = self.get_location()
+        _, lateral_raw = self._project_displacement(start_pose, current_pose)
+        final_lateral = lateral_raw * self.lateral_scale
+        final_error = distance - final_lateral
         rospy.loginfo(
-            "[RosBase] Closed-loop strafe finished (reached=%s, error=%.4f m)",
+            "[RosBase] Closed-loop strafe finished (reached=%s, error=%.4f m, odom=%.4f m, scaled=%.4f m)",
             reached,
             final_error,
+            lateral_raw,
+            final_lateral,
         )
-        return {
+        result = {
             "reached": reached,
-            "traveled": lateral,
+            "traveled": final_lateral,
+            "odom_traveled": lateral_raw,
             "error": final_error,
             "duration": duration,
+            "scale": self.lateral_scale,
+            "peak_velocity": peak_command,
         }
+        self._store_motion_report("lateral", result)
+        return result
 
     def rotate_angle(
         self,
         angle: float,
         max_angular_velocity: Optional[float] = None,
         tolerance: float = math.radians(1.0),
+        slow_angle: float = math.radians(20.0),
         kp: float = 2.5,
         ki: float = 0.0,
         kd: float = 0.1,
         integral_limit: float = 1.0,
         max_time: Optional[float] = None,
+        max_angular_acceleration: Optional[float] = None,
         log_progress: bool = False,
     ) -> dict:
-        """Rotate by ``angle`` radians using odometry feedback."""
+        """Rotate by ``angle`` radians using odometry feedback.
+
+        Notes
+        -----
+        The yaw change reported by odometry is multiplied by
+        :attr:`rotation_scale` before being compared to ``angle``.  When the
+        odometry already matches a physical measurement, keep the scale at
+        ``1.0`` and rely on ``slow_angle`` to taper the commanded angular
+        velocity as the heading error shrinks.
+
+        ``max_angular_acceleration`` can optionally limit the change of the
+        angular velocity command between control cycles.
+
+        The returned telemetry mirrors the linear methods and includes
+        ``peak_angular_velocity`` so tuning sessions can confirm the robot slowed
+        down before the target heading.
+        """
 
         if max_angular_velocity is None:
             max_angular_velocity = abs(self.angular_velocity)
         max_angular_velocity = abs(max_angular_velocity)
         if tolerance <= 0:
             raise ValueError("tolerance must be positive")
+        if slow_angle <= 0:
+            raise ValueError("slow_angle must be positive")
+        if (
+            max_angular_acceleration is not None
+            and max_angular_acceleration <= 0
+        ):
+            raise ValueError("max_angular_acceleration must be positive when provided")
 
         start_pose = self.get_location()
         start_yaw = start_pose[2]
-        target_yaw = start_yaw + angle
         start_time = rospy.get_time()
         last_time = start_time
         integral = 0.0
-        previous_error = angle
+        previous_error = self._normalize_angle(angle)
+        yaw_raw = 0.0
+        yaw = 0.0
         reached = False
+        previous_command = 0.0
+        peak_command = 0.0
         rate = rospy.Rate(self.control_rate_hz)
 
         if max_time is None:
@@ -502,16 +789,20 @@ class RosBase(object):
             max_time = max(1.0, 3.0 * nominal)
 
         rospy.loginfo(
-            "[RosBase] Closed-loop rotation target=%.2f deg (max vel %.2f rad/s)",
+            "[RosBase] Closed-loop rotation target=%.2f deg (max vel %.2f rad/s, scale %.3f, slow zone %.1f deg)",
             math.degrees(angle),
             max_angular_velocity,
+            self.rotation_scale,
+            math.degrees(slow_angle),
         )
 
         while not rospy.is_shutdown():
             current_time = rospy.get_time()
             dt = max(1.0 / self.control_rate_hz, current_time - last_time)
             _, _, current_yaw = self.get_location()
-            error = self._normalize_angle(target_yaw - current_yaw)
+            yaw_raw = self._normalize_angle(current_yaw - start_yaw)
+            yaw = yaw_raw * self.rotation_scale
+            error = self._normalize_angle(angle - yaw)
 
             if abs(error) <= tolerance:
                 reached = True
@@ -521,14 +812,30 @@ class RosBase(object):
             integral = max(-integral_limit, min(integral, integral_limit))
             derivative = (error - previous_error) / dt
             control = kp * error + ki * integral + kd * derivative
-            control = max(-max_angular_velocity, min(control, max_angular_velocity))
+
+            allowed_velocity = self._max_velocity_from_error(
+                error, tolerance, max_angular_velocity, slow_angle
+            )
+            control = max(-allowed_velocity, min(control, allowed_velocity))
+
+            if max_angular_acceleration is not None:
+                max_delta = max_angular_acceleration * dt
+                if control > previous_command + max_delta:
+                    control = previous_command + max_delta
+                elif control < previous_command - max_delta:
+                    control = previous_command - max_delta
 
             self._publish_cmd_vel(linear_x=0.0, angular_z=control)
 
+            peak_command = max(peak_command, abs(control))
+            previous_command = control
+
             if log_progress:
                 rospy.loginfo(
-                    "[RosBase] angular error: %.3f rad, cmd %.3f rad/s",
+                    "[RosBase] angular err: %.3f rad (odom %.3f rad, scaled %.3f rad), cmd %.3f rad/s",
                     error,
+                    yaw_raw,
+                    yaw,
                     control,
                 )
 
@@ -544,19 +851,28 @@ class RosBase(object):
         self.move_stop()
 
         duration = rospy.get_time() - start_time
-        _, _, final_yaw = self.get_location()
-        final_error = self._normalize_angle(target_yaw - final_yaw)
+        _, _, final_yaw_reading = self.get_location()
+        final_yaw_raw = self._normalize_angle(final_yaw_reading - start_yaw)
+        final_yaw = final_yaw_raw * self.rotation_scale
+        final_error = self._normalize_angle(angle - final_yaw)
         rospy.loginfo(
-            "[RosBase] Closed-loop rotation finished (reached=%s, error=%.4f rad)",
+            "[RosBase] Closed-loop rotation finished (reached=%s, error=%.4f rad, odom=%.4f rad, scaled=%.4f rad)",
             reached,
             final_error,
+            final_yaw_raw,
+            final_yaw,
         )
-        return {
+        result = {
             "reached": reached,
-            "traveled": self._normalize_angle(final_yaw - start_yaw),
+            "traveled": final_yaw,
+            "odom_traveled": final_yaw_raw,
             "error": final_error,
             "duration": duration,
+            "scale": self.rotation_scale,
+            "peak_angular_velocity": peak_command,
         }
+        self._store_motion_report("angular", result)
+        return result
 
     def get_location(self, if_p=False):
         """
