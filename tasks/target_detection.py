@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import numpy as np
 import tempfile
 import time
 from datetime import datetime
@@ -15,8 +16,7 @@ from camera import Camera
 
 
 def _resolve_host(host: str | None, host_env_var: str | None, default_host: str) -> str:
-    """Return the service host, honouring overrides and environment variables."""
-
+    """Return the service host, honoring overrides and environment variables."""
     if host:
         return host
     if host_env_var:
@@ -37,7 +37,6 @@ def get_target_coords_manual(
     valid_ratio_threshold: float = 0.5,
 ) -> Tuple[float, float, float]:
     """Capture an image and let the user click on a target of interest."""
-
     print(f"\n--- Starting Manual {target_name.title()} Detection ---")
     if wait_seconds > 0:
         print(f"Waiting {wait_seconds:.1f} seconds for the camera to stabilise...")
@@ -111,7 +110,6 @@ def get_target_coords_model(
     valid_ratio_threshold: float = 0.5,
 ) -> Tuple[float, float, float]:
     """Detect a target with a remote vision model and return 3D coordinates."""
-
     print(f"\n--- Starting Model-Based {target_name.title()} Detection ---")
 
     rgb_img, depth_img = cam.capture_rgbd()
@@ -125,7 +123,7 @@ def get_target_coords_model(
     cv2.imwrite(raw_path, rgb_img)
 
     resolved_host = _resolve_host(host, host_env_var, default_host)
-    endpoint = endpoint.lstrip("/")
+    endpoint = endpoint.strip("/ ")
     url = f"{resolved_host.rstrip('/')}/{endpoint}"
 
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
@@ -137,7 +135,7 @@ def get_target_coords_model(
         response.raise_for_status()
         result = response.json()
         x, y = result.get("x"), result.get("y")
-    except Exception as ex:  # pragma: no cover - network or server failure
+    except Exception as ex:  # pragma: no cover
         print(f"[ERROR] Model inference failed: {ex}")
         return None, None, None
     finally:
@@ -177,4 +175,134 @@ def get_target_coords_model(
     return X, Y, Z
 
 
-__all__ = ["get_target_coords_manual", "get_target_coords_model"]
+def detect_top_left_black_center(
+    cam: Camera,
+    *,
+    save_dir: str = "target_images",
+    target_name: str = "top-left black region",
+    wait_seconds: float = 0.0,
+    threshold_value: int = 50,
+    min_area: float = 10.0,
+    depth_roi_radius: int = 15,
+    depth_threshold: float = 0.05,
+    valid_ratio_threshold: float = 0.5,
+) -> Tuple[float, float, float]:
+    """
+    Detect the top-left black region from an RGB frame, retrieve depth, and
+    return 3D coordinates (X, Y, Z) in meters.
+
+    The algorithm thresholds the grayscale image to isolate dark regions,
+    performs basic morphology, finds external contours, selects the region
+    whose bounding box is closest to the image origin (0,0), then looks up
+    depth at the region center with ROI fallback and converts to XYZ.
+    """
+    print(f"\n--- Starting CV-Based {target_name.title()} Detection ---")
+    if wait_seconds > 0:
+        print(f"Waiting {wait_seconds:.1f} seconds for the camera to stabilise...")
+        time.sleep(wait_seconds)
+
+    # Capture RGB-D
+    rgb_img, depth_img = cam.capture_rgbd()
+    if rgb_img is None or depth_img is None:
+        print("[ERROR] Failed to capture RGBD frame.")
+        return None, None, None
+
+    os.makedirs(save_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    raw_path = os.path.join(save_dir, f"{timestamp}_rgb.jpg")
+    cv2.imwrite(raw_path, rgb_img)
+
+    # Convert to grayscale and threshold (invert so dark -> 255)
+    gray = cv2.cvtColor(rgb_img, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY_INV)
+
+    # Morphology to denoise
+    kernel = np.ones((3, 3), np.uint8)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+
+    # Find contours
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # If none found, progressively relax threshold
+    if not contours:
+        for lower in (30, 20, 10):
+            _, binary = cv2.threshold(gray, lower, 255, cv2.THRESH_BINARY_INV)
+            binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                break
+
+    if not contours:
+        print("[ERROR] No dark region detected.")
+        return None, None, None
+
+    # Select the contour whose bounding box center is closest to (0,0)
+    best = None
+    best_dist = float("inf")
+    best_center = (None, None)
+
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < min_area:
+            continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        cx = x + w // 2
+        cy = y + h // 2
+        dist = (x ** 2 + y ** 2) ** 0.5  # distance of top-left corner to origin
+        if dist < best_dist:
+            best_dist = dist
+            best = (x, y, w, h)
+            best_center = (cx, cy)
+
+    if best is None or best_center[0] is None:
+        print("[ERROR] No valid dark region after filtering.")
+        return None, None, None
+
+    x_c, y_c = int(best_center[0]), int(best_center[1])
+
+    # Visualize and save prediction overlay
+    vis_img = rgb_img.copy()
+    cv2.circle(vis_img, (x_c, y_c), 8, (0, 0, 255), 2)
+    bx, by, bw, bh = best
+    cv2.rectangle(vis_img, (bx, by), (bx + bw, by + bh), (0, 0, 255), 2)
+    vis_path = os.path.join(save_dir, f"{timestamp}_cv_pred.jpg")
+    cv2.imwrite(vis_path, vis_img)
+
+    # Depth lookup with ROI fallback
+    d_raw = cam.get_depth_point(x_c, y_c, depth_img)
+    if d_raw == 0 or d_raw is None:
+        d_raw = cam.get_depth_roi(
+            x_c,
+            y_c,
+            depth_img,
+            radius=depth_roi_radius,
+            depth_threshold=depth_threshold,
+            valid_ratio_threshold=valid_ratio_threshold,
+        )
+    if d_raw is None:
+        print(f"[ERROR] Detected dark region at ({x_c},{y_c}), but depth is invalid.")
+        return None, None, None
+
+    # Pixel -> 3D using camera intrinsics/extrinsics
+    X, Y, Z = cam.xy_depth_2_xyz(x_c, y_c, d_raw)
+    print(
+        "CV detected {} at pixel ({},{}) | Depth: {:.0f}mm -> 3D (X,Y,Z): ({:.4f}, {:.4f}, {:.4f}) m".format(
+            target_name, x_c, y_c, d_raw, X, Y, Z
+        )
+    )
+    print(f"Saved raw image to {raw_path} and CV prediction to {vis_path}")
+    return X, Y, Z
+
+
+def get_target_coords_cv():
+    # Placeholder for future CV-based detectors with a uniform interface.
+    pass
+
+
+__all__ = [
+    "get_target_coords_manual",
+    "get_target_coords_model",
+    "detect_top_left_black_center",
+]

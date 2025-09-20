@@ -13,8 +13,8 @@ from .door_open_sm import DoorOpenStateMachine
 def _compute_pull_pose(grasp_pose, down_dist, toward_dist):
     """Compute pull pose based on handle orientation."""
     x, y, z, roll, pitch, yaw = grasp_pose
-    new_x = x - toward_dist * math.sin(yaw)
-    new_y = y + toward_dist * math.cos(yaw)
+    new_x = x - toward_dist
+    new_y = y
     new_z = z - down_dist
     return [new_x, new_y, new_z, roll, pitch, yaw]
 
@@ -28,12 +28,13 @@ def _compute_push_pose(pull_pose, forward_dist):
 
 
 def open_door(
+
+    cam_arm: Camera = None,
+    cam_base: Camera = None,
+    arm: Arm = None,
+    base: RosBase = None,
     cfg_path: str = "cfg/cfg_door_open.yaml",
     use_model: bool = False,
-    cam_arm: Camera | None = None,
-    cam_base: Camera | None = None,
-    arm: Arm | None = None,
-    base: RosBase | None = None,
 ) -> str:
     """Run the full door opening procedure.
 
