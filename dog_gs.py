@@ -189,46 +189,27 @@ class RosBase(object):
         lateral: Optional[float] = None,
         rotation: Optional[float] = None,
     ) -> None:
-        """Manually set scaling factors applied to odometry feedback."""
-
         if translation is not None:
-            if translation <= 0:
-                raise ValueError("translation scale must be positive")
             self.translation_scale = float(translation)
             rospy.loginfo("Updated forward odometry scale to %.4f", self.translation_scale)
 
         if lateral is not None:
-            if lateral <= 0:
-                raise ValueError("lateral scale must be positive")
             self.lateral_scale = float(lateral)
             rospy.loginfo("Updated lateral odometry scale to %.4f", self.lateral_scale)
 
         if rotation is not None:
-            if rotation <= 0:
-                raise ValueError("rotation scale must be positive")
             self.rotation_scale = float(rotation)
             rospy.loginfo("Updated rotational odometry scale to %.4f", self.rotation_scale)
 
-    def _calibrate_scale(
-        self,
-        actual: float,
-        odom: float,
-        motion_type: str,
-    ) -> float:
-        """Helper computing |actual|/|odom| ensuring valid inputs."""
-
-        odom_mag = abs(float(odom))
-        if odom_mag <= 1e-6:
+    def _calibrate_scale(self, actual: float, odom: float, motion_type: str) -> float:
+        odom_val = float(odom)
+        if abs(odom_val) <= 1e-6:
             raise ValueError("odometry distance must be non-zero for calibration")
-        scale = abs(float(actual)) / odom_mag
-        if scale <= 0:
-            raise ValueError("calculated scale must be positive")
+        # 关键：保留符号，既能纠正比例，也能翻转方向
+        scale = float(actual) / odom_val
         rospy.loginfo(
             "Calibrated %s odometry scale: actual=%.4f, odom=%.4f, scale=%.4f",
-            motion_type,
-            actual,
-            odom,
-            scale,
+            motion_type, actual, odom_val, scale
         )
         return scale
 
@@ -432,7 +413,7 @@ class RosBase(object):
         slow_distance: float = 0.2,
         kp: float = 1.2,
         ki: float = 0.0,
-        kd: float = 0.05,
+        kd: float = 0.00,
         integral_limit: float = 0.5,
         max_time: Optional[float] = None,
         max_linear_acceleration: Optional[float] = None,
@@ -502,13 +483,14 @@ class RosBase(object):
         )
 
         while not rospy.is_shutdown():
+            # self.get_location(if_p=True)
             current_time = rospy.get_time()
             dt = max(1.0 / self.control_rate_hz, current_time - last_time)
             current_pose = self.get_location()
             traveled_raw, _ = self._project_displacement(start_pose, current_pose)
             traveled = traveled_raw * self.translation_scale
             error = distance - traveled
-
+            # print("error:", error)
             if abs(error) <= tolerance:
                 reached = True
                 break
@@ -530,6 +512,7 @@ class RosBase(object):
                 elif control < previous_command - max_delta:
                     control = previous_command - max_delta
 
+            # print("control:", control)
             self._publish_cmd_vel(linear_x=control, angular_z=0.0)
 
             peak_command = max(peak_command, abs(control))
@@ -650,7 +633,8 @@ class RosBase(object):
 
         while not rospy.is_shutdown():
             current_time = rospy.get_time()
-            dt = max(1.0 / self.control_rate_hz, current_time - last_time)
+            # dt = max(1.0 / self.control_rate_hz, current_time - last_time)
+            dt = max(1.0 / 10, current_time - last_time)
             current_pose = self.get_location()
             _, lateral_raw = self._project_displacement(start_pose, current_pose)
             lateral = lateral_raw * self.lateral_scale
@@ -892,6 +876,7 @@ class RosBase(object):
 
         location = [position.x, position.y, yaw]
         if if_p:
+
             rospy.loginfo(
                 f"Location: [x={location[0]:.3f}, y={location[1]:.3f}, theta={location[2]:.3f}]"
             )
@@ -1072,6 +1057,7 @@ class RosBase(object):
                 return char
 
         while not rospy.is_shutdown():
+            print(f"location: {self.get_location(if_p=True)}")
             char = getch()
             if char == "\x03":  # Ctrl+C
                 break
@@ -1091,22 +1077,28 @@ class RosBase(object):
 if __name__ == "__main__":
     try:
         # Initialize the base controller with fast settings
-        base = RosBase(linear_velocity=0.5, angular_velocity=0.8)
+        base = RosBase(linear_velocity=0.1, angular_velocity=0.1)
         print(base)
-
+        base.update_odometry_scales(translation=-1.0, lateral=-1.0)      
         # Example Usage:
         # 1. Keyboard control (uncomment to use)
         # print("\n--- Starting Keyboard Control ---")
+        
         # base.move_keyboard(interval=0.01)
 
         # 2. Closed-loop movement example using odometry
         print("\n--- Testing Closed-loop Movements ---")
         rospy.loginfo("Moving forward 0.5 m using odometry feedback...")
-        base.move_distance(0.5, max_linear_velocity=0.3)
+        
+        base.get_location(if_p=True)
+        # base.move_distance(0.7, max_linear_velocity=0.1)
+        # base.strafe_distance(0.23, max_linear_velocity=0.1)
+        base.rotate_angle(math.radians(120), max_angular_velocity=0.1)
+        base.get_location(if_p=True)
         rospy.sleep(1)  # Pause
-        rospy.loginfo("Rotating left 90 degrees using odometry feedback...")
-        base.rotate_angle(math.radians(90), max_angular_velocity=0.6)
-        rospy.sleep(1)
+        # rospy.loginfo("Rotating left 90 degrees using odometry feedback...")
+        # base.rotate_angle(math.radians(90), max_angular_velocity=0.6)
+        # rospy.sleep(1)
 
         # # 3. Marker and Navigation example
         # # Assumes a navigation stack (like move_base) is running
