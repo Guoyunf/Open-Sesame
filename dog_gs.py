@@ -38,42 +38,44 @@ import actionlib
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 
 
-def _call_robot_command_service(
+def _make_robot_command_request():
+    """Create an empty RobotCommand request instance."""
+
+    if RobotCommandSrv is None:
+        raise RuntimeError(
+            "RobotCommand service support requires the message definitions to be installed."
+        )
+
+    request_cls = getattr(RobotCommandSrv, "Request", None)
+    if request_cls is None:
+        request_cls = getattr(RobotCommandSrv, "_request_class", None)
+
+    if request_cls is None:  # pragma: no cover - depends on runtime bindings
+        raise RuntimeError("RobotCommand request type is unavailable.")
+
+    return request_cls()
+
+
+def _set_robot_command_name(request, command_name):
+    """Populate the command field on a RobotCommand request."""
+
+    if hasattr(request, "comamnd_name"):
+        setattr(request, "comamnd_name", command_name)
+    elif hasattr(request, "command_name"):
+        setattr(request, "command_name", command_name)
+    else:  # pragma: no cover - defensive for unexpected interface
+        raise AttributeError(
+            "RobotCommand request does not define 'comamnd_name' or 'command_name'."
+        )
+
+
+def _call_robot_command_service_ros2(
     command_name,
     *,
     service_name="/nav/robot_command",
     timeout_sec=5.0,
 ):
-    """Send a ``RobotCommand`` request via ROS 2.
-
-    Parameters
-    ----------
-    command_name:
-        Name of the command to send to the robot.  For the Unitree-based
-        quadruped the ``"StandUpDown"`` command toggles between standing and
-        lying postures.
-    service_name:
-        Fully qualified service name.  Defaults to ``"/nav/robot_command"`` to
-        match the bridge configuration used on the robot platform.
-    timeout_sec:
-        Maximum amount of time to wait for the service to become available and
-        to return a response.
-
-    Returns
-    -------
-    ysc_robot_msgs.srv.RobotCommand.Response
-        The ROS 2 service response object.
-
-    Raises
-    ------
-    RuntimeError
-        If ROS 2 support is not available or the service fails.
-    TimeoutError
-        If the service call exceeds ``timeout_sec`` seconds.
-    AttributeError
-        If the ``RobotCommand`` request does not expose a recognised command
-        field name.
-    """
+    """Send a ``RobotCommand`` request via ROS 2."""
 
     if rclpy is None or RobotCommandSrv is None:
         raise RuntimeError(
@@ -81,8 +83,6 @@ def _call_robot_command_service(
             "the 'ysc_robot_msgs' interfaces to be installed."
         )
 
-    # ``is_initialized`` was introduced in ROS 2 Foxy; fall back to checking
-    # ``rclpy.ok()`` on older distributions where needed.
     needs_shutdown = False
     is_init = False
     if rclpy_is_initialized is not None:
@@ -106,15 +106,8 @@ def _call_robot_command_service(
                 f"Service '{service_name}' unavailable after {timeout_sec} seconds."
             )
 
-        request = RobotCommandSrv.Request()
-        if hasattr(request, "comamnd_name"):
-            setattr(request, "comamnd_name", command_name)
-        elif hasattr(request, "command_name"):
-            setattr(request, "command_name", command_name)
-        else:
-            raise AttributeError(
-                "RobotCommand request does not define 'comamnd_name' or 'command_name'."
-            )
+        request = _make_robot_command_request()
+        _set_robot_command_name(request, command_name)
 
         future = client.call_async(request)
 
@@ -143,6 +136,91 @@ def _call_robot_command_service(
         node.destroy_node()
         if needs_shutdown:
             rclpy.shutdown()
+
+
+def _call_robot_command_service_ros1(
+    command_name,
+    *,
+    service_name="/nav/robot_command",
+    timeout_sec=5.0,
+):
+    """Send a ``RobotCommand`` request via ROS 1."""
+
+    if RobotCommandSrv is None:
+        raise RuntimeError(
+            "RobotCommand service support requires the message definitions to be installed."
+        )
+
+    try:
+        rospy.wait_for_service(service_name, timeout=timeout_sec)
+    except rospy.ROSException as exc:
+        raise TimeoutError(
+            f"Service '{service_name}' unavailable after {timeout_sec} seconds."
+        ) from exc
+
+    client = rospy.ServiceProxy(service_name, RobotCommandSrv)
+    request = _make_robot_command_request()
+    _set_robot_command_name(request, command_name)
+
+    try:
+        return client(request)
+    except rospy.ServiceException as exc:  # pragma: no cover - depends on ROS runtime
+        raise RuntimeError(f"Robot command service failed via ROS 1: {exc}") from exc
+
+
+def _call_robot_command_service(
+    command_name,
+    *,
+    service_name="/nav/robot_command",
+    timeout_sec=5.0,
+    transport="auto",
+):
+    """Send a ``RobotCommand`` request using ROS 1, ROS 2 or both."""
+
+    if transport not in {"auto", "ros1", "ros2"}:
+        raise ValueError("transport must be 'auto', 'ros1', or 'ros2'.")
+
+    transports_to_try = []
+    if transport == "ros2":
+        transports_to_try = ["ros2"]
+    elif transport == "ros1":
+        transports_to_try = ["ros1"]
+    else:  # auto
+        if rclpy is not None:
+            transports_to_try.append("ros2")
+        transports_to_try.append("ros1")
+
+    last_exc = None
+    for idx, mode in enumerate(transports_to_try):
+        try:
+            if mode == "ros2":
+                return _call_robot_command_service_ros2(
+                    command_name,
+                    service_name=service_name,
+                    timeout_sec=timeout_sec,
+                )
+            return _call_robot_command_service_ros1(
+                command_name,
+                service_name=service_name,
+                timeout_sec=timeout_sec,
+            )
+        except Exception as exc:  # pragma: no cover - runtime dependent
+            last_exc = exc
+            if idx < len(transports_to_try) - 1:
+                next_mode = transports_to_try[idx + 1]
+                rospy.logwarn(
+                    "RobotCommand via ROS %s failed (%s); trying ROS %s instead.",
+                    mode.upper(),
+                    exc,
+                    next_mode.upper(),
+                )
+            else:
+                raise
+
+    if last_exc is not None:  # pragma: no cover - defensive
+        raise last_exc
+
+    raise RuntimeError("No transport available for RobotCommand requests.")
 
 
 class RosBase(object):
@@ -448,8 +526,9 @@ class RosBase(object):
         *,
         service_name="/nav/robot_command",
         timeout_sec=5.0,
+        transport="auto",
     ):
-        """Send a low-level RobotCommand service request via ROS 2.
+        """Send a low-level RobotCommand service request via ROS 1/ROS 2.
 
         Parameters
         ----------
@@ -461,6 +540,10 @@ class RosBase(object):
             in the ROS1/ROS2 bridge configuration.
         timeout_sec:
             Maximum amount of time to wait for the service to respond.
+        transport:
+            Communication transport to use.  ``"auto"`` (default) first attempts
+            ROS 2 if available and falls back to ROS 1, ``"ros1"`` forces the
+            ROS 1 service proxy, and ``"ros2"`` forces the ROS 2 client.
 
         Returns
         -------
@@ -472,7 +555,7 @@ class RosBase(object):
         TimeoutError
             If the service call exceeds ``timeout_sec`` seconds.
         RuntimeError
-            If the call fails or ROS 2 support is unavailable.
+            If the call fails or the requested transport is unavailable.
         """
 
         try:
@@ -480,6 +563,7 @@ class RosBase(object):
                 command_name,
                 service_name=service_name,
                 timeout_sec=timeout_sec,
+                transport=transport,
             )
         except TimeoutError as exc:
             rospy.logerr(
@@ -495,12 +579,14 @@ class RosBase(object):
         *,
         service_name="/nav/robot_command",
         timeout_sec=5.0,
+        transport="auto",
     ):
         """Request the quadruped to assume a lying posture.
 
         This helper wraps the ``StandUpDown`` command exposed via the
-        ``/nav/robot_command`` ROS 2 service, allowing callers to trigger the
-        posture change directly from Python.
+        ``/nav/robot_command`` service, allowing callers to trigger the posture
+        change directly from Python whether the service is accessed through
+        ROS 2 or a ROS1/ROS2 bridge.
 
         Parameters
         ----------
@@ -508,6 +594,8 @@ class RosBase(object):
             Target service name.  Defaults to ``"/nav/robot_command"``.
         timeout_sec:
             Maximum amount of time to wait for the service to respond.
+        transport:
+            Transport selector forwarded to :meth:`send_robot_command`.
 
         Returns
         -------
@@ -519,6 +607,7 @@ class RosBase(object):
             "StandUpDown",
             service_name=service_name,
             timeout_sec=timeout_sec,
+            transport=transport,
         )
 
         # Try to provide informative logging regardless of the specific
