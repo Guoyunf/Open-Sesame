@@ -112,67 +112,95 @@ def get_target_coords_model(
     """Detect a target with a remote vision model and return 3D coordinates."""
     print(f"\n--- Starting Model-Based {target_name.title()} Detection ---")
 
-    rgb_img, depth_img = cam.capture_rgbd()
-    if rgb_img is None or depth_img is None:
-        print("[ERROR] Failed to capture RGBD frame.")
-        return None, None, None
-
-    os.makedirs(save_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    raw_path = os.path.join(save_dir, f"{timestamp}_rgb.jpg")
-    cv2.imwrite(raw_path, rgb_img)
-
     resolved_host = _resolve_host(host, host_env_var, default_host)
     endpoint = endpoint.strip("/ ")
     url = f"{resolved_host.rstrip('/')}/{endpoint}"
 
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-        tmp_path = tmp.name
-    try:
-        cv2.imwrite(tmp_path, rgb_img)
-        with open(tmp_path, "rb") as f:
-            response = requests.post(url, files={"file": f}, timeout=request_timeout)
-        response.raise_for_status()
-        result = response.json()
-        x, y = result.get("x"), result.get("y")
-    except Exception as ex:  # pragma: no cover
-        print(f"[ERROR] Model inference failed: {ex}")
-        return None, None, None
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    os.makedirs(save_dir, exist_ok=True)
 
-    if x is None or y is None:
-        print("[ERROR] Model failed to detect the target.")
-        return None, None, None
+    def _cleanup_attempt_files(*paths: str) -> None:
+        for path in paths:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
-    vis_img = rgb_img.copy()
-    cv2.circle(vis_img, (int(x), int(y)), 8, (0, 0, 255), 2)
-    vis_path = os.path.join(save_dir, f"{timestamp}_pred.jpg")
-    cv2.imwrite(vis_path, vis_img)
+    attempt = 0
+    while True:
+        attempt += 1
+        if attempt > 1:
+            print(
+                f"[INFO] Retrying model-based detection attempt #{attempt} for {target_name}."
+            )
 
-    d_raw = cam.get_depth_point(x, y, depth_img)
-    if d_raw == 0 or d_raw is None:
-        d_raw = cam.get_depth_roi(
-            x,
-            y,
-            depth_img,
-            radius=depth_roi_radius,
-            depth_threshold=depth_threshold,
-            valid_ratio_threshold=valid_ratio_threshold,
+        rgb_img, depth_img = cam.capture_rgbd()
+        if rgb_img is None or depth_img is None:
+            print("[ERROR] Failed to capture RGBD frame.")
+            return None, None, None
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        raw_path = os.path.join(save_dir, f"{timestamp}_rgb.jpg")
+        cv2.imwrite(raw_path, rgb_img)
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            cv2.imwrite(tmp_path, rgb_img)
+            with open(tmp_path, "rb") as f:
+                response = requests.post(url, files={"file": f}, timeout=request_timeout)
+            response.raise_for_status()
+            result = response.json()
+            x, y = result.get("x"), result.get("y")
+        except Exception as ex:  # pragma: no cover
+            print(f"[ERROR] Model inference failed: {ex}")
+            return None, None, None
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+        if x is None or y is None:
+            print("[ERROR] Model failed to detect the target.")
+            return None, None, None
+
+        vis_img = rgb_img.copy()
+        cv2.circle(vis_img, (int(x), int(y)), 8, (0, 0, 255), 2)
+        vis_path = os.path.join(save_dir, f"{timestamp}_pred.jpg")
+        cv2.imwrite(vis_path, vis_img)
+
+        d_raw = cam.get_depth_point(x, y, depth_img)
+        if d_raw == 0 or d_raw is None:
+            d_raw = cam.get_depth_roi(
+                x,
+                y,
+                depth_img,
+                radius=depth_roi_radius,
+                depth_threshold=depth_threshold,
+                valid_ratio_threshold=valid_ratio_threshold,
+            )
+        if d_raw is None:
+            print(
+                f"[WARNING] Detected {target_name} at ({x},{y}), but depth is invalid. Retrying..."
+            )
+            _cleanup_attempt_files(raw_path, vis_path)
+            continue
+
+        X, Y, Z = cam.xy_depth_2_xyz(x, y, d_raw)
+        coords = np.array([X, Y, Z], dtype=float)
+        if not np.all(np.isfinite(coords)):
+            print(
+                f"[WARNING] Detected {target_name} at ({x},{y}), but computed XYZ {coords} contains non-finite values. Retrying..."
+            )
+            _cleanup_attempt_files(raw_path, vis_path)
+            continue
+
+        print(
+            "Model detected {} at pixel ({},{}) -> 3D Coords (X,Y,Z): ({:.4f}, {:.4f}, {:.4f}) m".format(
+                target_name, x, y, X, Y, Z
+            )
         )
-    if d_raw is None:
-        print(f"[ERROR] Detected {target_name} at ({x},{y}), but depth is invalid.")
-        return None, None, None
-
-    X, Y, Z = cam.xy_depth_2_xyz(x, y, d_raw)
-    print(
-        "Model detected {} at pixel ({},{}) -> 3D Coords (X,Y,Z): ({:.4f}, {:.4f}, {:.4f}) m".format(
-            target_name, x, y, X, Y, Z
-        )
-    )
-    print(f"Saved raw image to {raw_path} and prediction to {vis_path}")
-    return X, Y, Z
+        print(f"Saved raw image to {raw_path} and prediction to {vis_path}")
+        return X, Y, Z
 
 
 def detect_top_left_black_center(
