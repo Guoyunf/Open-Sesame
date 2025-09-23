@@ -108,6 +108,9 @@ def get_target_coords_model(
     depth_roi_radius: int = 15,
     depth_threshold: float = 0.05,
     valid_ratio_threshold: float = 0.5,
+    sys_prompt: str | None = None,
+    user_prompt: str | None = None,
+    max_new_tokens: int | None = None,
 ) -> Tuple[float, float, float]:
     """Detect a target with a remote vision model and return 3D coordinates."""
     print(f"\n--- Starting Model-Based {target_name.title()} Detection ---")
@@ -147,8 +150,21 @@ def get_target_coords_model(
             tmp_path = tmp.name
         try:
             cv2.imwrite(tmp_path, rgb_img)
+            form_data = {}
+            if sys_prompt is not None:
+                form_data["sys_prompt"] = sys_prompt
+            if user_prompt is not None:
+                form_data["user_prompt"] = user_prompt
+            if max_new_tokens is not None:
+                form_data["max_new_tokens"] = str(int(max_new_tokens))
+
             with open(tmp_path, "rb") as f:
-                response = requests.post(url, files={"file": f}, timeout=request_timeout)
+                response = requests.post(
+                    url,
+                    files={"file": f},
+                    data=form_data if form_data else None,
+                    timeout=request_timeout,
+                )
             response.raise_for_status()
             result = response.json()
             x, y = result.get("x"), result.get("y")
