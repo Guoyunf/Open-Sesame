@@ -4,7 +4,7 @@ import os
 import time
 import tempfile
 from datetime import datetime
-from typing import Tuple
+from typing import Tuple, Optional
 
 import cv2
 import requests
@@ -72,7 +72,7 @@ DEFAULT_HANDLE_DET_HOST = os.environ.get("HANDLE_DETECTION_HOST", "http://127.0.
 
 
 def get_handle_coords_model(
-    cam: Camera, host: str | None = None, save_dir: str = "handle_images"
+    cam: Camera, host: Optional[str] = None, save_dir: str = "handle_images"
 ) -> Tuple[float, float, float]:
     """Detect handle with a vision model and return coordinates in camera frame.
 
