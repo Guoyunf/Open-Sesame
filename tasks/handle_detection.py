@@ -1,8 +1,11 @@
 """Handle detection utilities using camera images."""
 
 from __future__ import annotations
-
-from typing import Tuple
+import os
+import time
+import tempfile
+from datetime import datetime
+from typing import Tuple, Optional
 
 from camera import Camera
 
@@ -20,7 +23,7 @@ def get_handle_coords_manual(cam: Camera) -> Tuple[float, float, float]:
 
 
 def get_handle_coords_model(
-    cam: Camera, host: str | None = None, save_dir: str = "handle_images"
+    cam: Camera, host: Optional[str] = None, save_dir: str = "handle_images"
 ) -> Tuple[float, float, float]:
     """Detect the door handle with a remote model and return camera-frame coordinates."""
 
