@@ -207,3 +207,10 @@ marimo/_lsp/
 __marimo__/
 *.png
 *.npy
+button_images
+data_collection
+diffusion_policy
+gopro_collect
+handle_images
+target_images
+*.txt
