@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, List, Sequence, Tuple
+from typing import TYPE_CHECKING, Callable, List, Sequence, Tuple
 
 from utils.lib_io import read_yaml_file
 
@@ -60,14 +60,13 @@ def _as_float(value: object, default: float = 0.0) -> float:
         return float(default)
 
 
-def press_button(
-    cfg_path: str = "cfg/cfg_button_press.yaml",
-    use_model: bool = False,
-    cam: "Camera" | None = None,
-    arm: "Arm" | None = None,
+def _press_button_impl(
+    cfg_path: str,
+    detector: Callable[["Camera"], Tuple[float, float, float]],
+    *,
+    cam: "Camera" | None,
+    arm: "Arm" | None,
 ) -> str:
-    """Detect a button, move the arm to it and press along ``-Y``."""
-
     cfg = read_yaml_file(cfg_path)
 
     cam_created = False
@@ -85,10 +84,7 @@ def press_button(
         arm_created = True
 
     try:
-        if use_model:
-            x_cam, y_cam, z_cam = get_button_coords_model(cam)
-        else:
-            x_cam, y_cam, z_cam = get_button_coords_manual(cam)
+        x_cam, y_cam, z_cam = detector(cam)
 
         if x_cam is None or y_cam is None or z_cam is None:
             print("[ERROR] Button detection failed.")
@@ -143,6 +139,24 @@ def press_button(
                 arm.open_gripper()
             except Exception:
                 pass
+
+
+def press_button(
+    cfg_path: str = "cfg/cfg_button_press.yaml",
+    use_model: bool = False,
+    cam: "Camera" | None = None,
+    arm: "Arm" | None = None,
+) -> str:
+    """Detect a button, move the arm to it and press along ``-Y``."""
+
+    def _manual_detector(camera: "Camera") -> Tuple[float, float, float]:
+        return get_button_coords_manual(camera)
+
+    def _model_detector(camera: "Camera") -> Tuple[float, float, float]:
+        return get_button_coords_model(camera)
+
+    detector = _model_detector if use_model else _manual_detector
+    return _press_button_impl(cfg_path, detector, cam=cam, arm=arm)
 
 
 __all__ = ["press_button"]
